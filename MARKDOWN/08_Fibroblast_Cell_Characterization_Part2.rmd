@@ -1,0 +1,256 @@
+---
+title: "08_Fibroblast_Cell_Characterization_Part2"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2025-12-09"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# CAF Cell Population - Load object and libraries
+```{r, warning=FALSE, message=FALSE}
+suppressPackageStartupMessages({
+library(Seurat)
+library(SeuratObject)
+library(SeuratWrappers)
+library(AUCell)
+library(monocle3)
+library(GSVA)
+library(pheatmap)
+library(tidyverse)
+library(RColorBrewer)
+library(readxl)
+library(DT)
+library(EnhancedVolcano)
+library(enrichplot)
+library(cowplot)
+library(DESeq2)
+library(ggalt)
+library(devtools)
+library(ashr)
+library(tidytree)
+library(dplyr)
+library(fgsea)
+library(msigdbr)
+library(ggpubr)
+#install.packages("ggpubr")
+})
+#source functions
+source("../UTILS/pseudobulk_functions.R")
+source("../UTILS/patient_split.R")
+source("../UTILS/GSEA.R")
+
+#source object
+fibro <- readRDS("../OBJECTS/final_fibroblasts_for_part2.RDS")
+Idents(fibro) <- 'UMAP_Clusters'
+DimPlot(fibro)
+```
+
+#Differentially Expressed Genes code:(using corrected counts assay)
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(object = fibro) <- "CorrectedCounts" #make sure you always use corrected counts when finding markers
+Fibro_scaled <- ScaleData(fibro, features = rownames(fibro))
+Idents(object = Fibro_scaled) <- 'time_point'
+levels(Fibro_scaled)
+```
+
+#NR-CAF Signature
+```{r, warning=FALSE, message=FALSE}
+agf_signature <- c("NEGR1", "SLIT2", "ROBO1", "EPHA3","NRP1", "NFIA")
+AGF <- list(
+  
+  agf_signature = agf_signature
+)
+expr <- GetAssayData(fibro,
+                     assay = "CorrectedCounts",
+                     layer = "counts")
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+auc_score <- AUCell_calcAUC(rankings = geneRanking, geneSets = AGF, aucMaxRank = nrow(geneRanking)*0.1)
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score <- as.data.frame(t(assay(c(auc_score))))
+auc_score_scaled <- as.data.frame(scale(auc_score))
+
+#scaled the data and add it as metadata
+fibro <- AddMetaData(fibro, metadata = auc_score_scaled)
+FeaturePlot(fibro, features = c("agf_signature"), pt.size =1, label = FALSE, repel = TRUE, order = TRUE) & 
+  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+```
+## Define what "top expressors" means (e.g., top 10% of cells)
+```{r, warning=FALSE, message=FALSE}
+agf_threshold <- quantile(fibro$agf_signature, 0.75)  # top 25%
+# 2. Create a new metadata column
+fibro$agf <- ifelse(fibro$agf_signature >= agf_threshold, "agf", "caf")
+# Check distribution
+table(fibro$agf)
+#saveRDS(fibro, "../OBJECTS/final_fibroblasts_for_part2.RDS")
+```
+
+# Differential Expression and Pathway Analysis of NR-CAFs
+```{r, warning=FALSE, message=FALSE}
+Idents(fibro) <- "agf"
+levels(fibro)
+
+agf.markers <- FindMarkers(fibro, ident.1 = "agf", ident.2 = "caf", assay = "RNA", test.use = "MAST", verbose = FALSE, recorrect_umi = FALSE, logfc.threshold = 0)
+agf.markers.reversed <- FindMarkers(fibro, ident.1 = "caf", ident.2 = "agf", assay = "RNA", test.use = "MAST", verbose = FALSE, recorrect_umi = FALSE, logfc.threshold = 0)
+
+#write.csv(agf.markers, file = "../DATA_FILES/Differential_Gene_Expression_NR_CAFS.csv")
+#write.csv(agf.markers.reversed, file = "../DATA_FILES/Differential_Gene_Expression_NR_CAFS_reversed.csv")
+#############################################################################################################
+```
+# HALLMARK PATHWAYS\
+## GSEA
+```{r, warning=FALSE, message=FALSE}
+library(msigdbr)
+hallmarks_pathways <- msigdbr(species = "Homo sapiens", category = 'H', subcategory = NULL)
+hallmarks_pathways <- split(x = hallmarks_pathways$gene_symbol, f = hallmarks_pathways$gs_name)
+#this code takes the hallmark pathway and splits it into vectors with each pathway and the genes that belong to each pathway
+
+#loaded hall mark pathway gene expression and made an expression df using the information from the RNA assay
+agf.markers$gene <- rownames(agf.markers)
+DEG_patient <- agf.markers %>% arrange(desc(avg_log2FC))
+fold_changes <- DEG_patient$avg_log2FC
+names(fold_changes) <- DEG_patient$gene
+head(fold_changes)
+
+#loaded hall mark pathway gene expression and made an expression df using the information from the RNA assay
+agf.markers.reversed$gene <- rownames(agf.markers.reversed)
+DEG_patient_reversed <- agf.markers.reversed %>% arrange(desc(avg_log2FC))
+fold_changes_reversed <- DEG_patient_reversed$avg_log2FC
+names(fold_changes_reversed) <- DEG_patient_reversed$gene
+head(fold_changes_reversed)
+
+
+gsea_patient <- fgsea(hallmarks_pathways, stats = fold_changes_reversed, nperm = 1000)
+gsea_sig <- gsea_patient %>% filter(padj < 0.05)
+
+gsea_tidy <- gsea_patient %>% as_tibble() %>% arrange(desc(NES))
+gsea_sig_tidy <- gsea_tidy %>% filter(padj < 0.05)
+
+ggplot(gsea_sig,
+       aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill = padj)) +
+  coord_flip() +
+  labs(x = "Pathway", y = "Normalized Enrichment Score", title = "Hallmark Pathways NES from GSEA")+
+  theme_minimal()
+
+##########################################################################################################################################################
+```
+## GO Genes
+```{r, warning=FALSE, message=FALSE}
+library(clusterProfiler)
+library(enrichplot)
+library(pathview)
+
+# we want the log2 fold change 
+Go_logfoldchange <- agf.markers$avg_log2FC
+# name the vector
+names(Go_logfoldchange) <- agf.markers$gene
+
+# omit any NA values 
+Go_logfoldchange_short<-na.omit(Go_logfoldchange)
+
+# sort the list in decreasing order (required for clusterProfiler)
+Go_logfoldchange_short = sort(Go_logfoldchange_short, decreasing = TRUE)
+library("org.Hs.eg.db", character.only = TRUE)
+gse <- gseGO(geneList = Go_logfoldchange_short, 
+             ont ="ALL", 
+             keyType = "SYMBOL",
+             nPerm = 10000, 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.1, 
+             verbose = TRUE, 
+             OrgDb = org.Hs.eg.db, 
+             pAdjustMethod = "fdr")
+
+
+##############################################################################################################
+```
+
+## KEGG Reactome
+```{r, warning=FALSE, message=FALSE}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+up_in_t1 <- agf.markers.reversed %>%
+  filter(avg_log2FC > 0 )
+
+down_in_t1 <- agf.markers.reversed %>%
+  filter(avg_log2FC < 0)
+
+up_ids <- bitr(up_in_t1$gene, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
+down_ids <- bitr(down_in_t1$gene, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
+
+up_kegg <- enrichKEGG(gene=up_ids$ENTREZID, organism="hsa", pvalueCutoff=0.05)
+down_kegg <- enrichKEGG(gene=down_ids$ENTREZID, organism="hsa", pvalueCutoff=0.05)
+
+up_df <- as.data.frame(up_kegg)
+down_df <- as.data.frame(down_kegg)
+
+up_df$direction <- "Down in T1"
+down_df$direction <- "Up in T1"
+
+up_df$enrichment_score <- -log10(up_df$p.adjust)
+down_df$enrichment_score <- log10(down_df$p.adjust)
+
+combined_df <- bind_rows(up_df, down_df) %>%
+  filter(!is.infinite(enrichment_score)) %>%
+  arrange(desc(abs(enrichment_score))) %>%
+  slice(1:50)  # adjust number of categories shown
+
+# Plot
+ggplot(combined_df, aes(x = reorder(Description, enrichment_score), y = enrichment_score, fill = direction)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = c("Up in T1" = "blue", "Down in T1" = "red")) +
+  labs(title = "KEGG Pathways Enriched",
+       x = "Pathway", y = "Signed -log10(adjusted p-value)") +
+  theme_minimal(base_size = 14)
+```
+# Genes Expression of Published Genes 
+```{r, warning=FALSE, message=FALSE}
+################# Loooking At Published CAF genes###############
+DefaultAssay(fibro) <- "CorrectedCounts"
+Idents(fibro) <- "patient_id"
+VlnPlot(fibro, features = c("LRRC15", "DPT", "PDGFRB", "PDGFRA",
+                            "TAGLN", "FAP", "PDPN"), pt.size = 0, split.by = "time_point", split.plot = TRUE)
+VlnPlot(fibro, features = c("LEF1", "FABP4"), pt.size = 0, split.by = "time_point", split.plot = TRUE)
+
+
+Idents(fibro) <- "time_point"
+VlnPlot(fibro, features = c("LRRC15", "DPT", "LEF1", "PDGFRB", "PDGFRA",
+                            "TAGLN", "FAP", "PDPN", "FABP4"), pt.size = 0)
+
+```

@@ -1,0 +1,166 @@
+---
+title: "0.2 Numbat Analysis "
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2024-12-08"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Introduction - Numbat Clones for Longitudinal PDAC Project
+
+
+## Load in Data and Libraries
+```{r}
+##Adapted from Ahmed Elhoissiny Pasca Lab 
+
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(numbat)
+  library(tidyverse)
+  library(dplyr)
+  library(data.table)
+  library(stringr)
+  library(glue)
+  library(Matrix)
+  library(SeuratDisk)
+  library(cowplot)
+})
+
+integrated_data <- readRDS("../OBJECTS/numbat/eileen_annotated_longitudinal.rds")
+
+samples_info <- readxl::read_xlsx("../OBJECTS/numbat/samples_info.xlsx") %>%
+  filter(project == 'longitudinal') %>%
+  select(patient_id, sample_id, tissue, timepoint)
+DT::datatable(samples_info)
+
+
+numbat_results_LLR_5_ent_0.5 <- readRDS("../OBJECTS/numbat/Numbat_Results.rds")
+cells_metadata_LLR_5_ent_0.5 <- lapply(names(numbat_results_LLR_5_ent_0.5), FUN = function(x){
+  cell_labels <- numbat_results_LLR_5_ent_0.5[[x]][[1]]
+  cell_labels <- cell_labels %>%
+    mutate(cell = paste0(cell,"_",x), clone = paste0(x,"_",clone)) %>%
+    select(cell, compartment, clone) %>%
+    column_to_rownames('cell') %>%
+    `colnames<-`(c("compartment_LLR_5_ent_0.5", "clone_LLR_5_ent_0.5"))
+}) %>% bind_rows() 
+
+numbat_results_LLR_2_ent_1 <- readRDS("../OBJECTS/numbat/Numbat_Results_LLR_2_Ent_1.rds")
+cells_metadata_LLR_2_ent_1 <- lapply(names(numbat_results_LLR_2_ent_1), FUN = function(x){
+  cell_labels <- numbat_results_LLR_2_ent_1[[x]][[1]]
+  cell_labels <- cell_labels %>%
+    mutate(cell = paste0(cell,"_",x), clone = paste0(x,"_",clone)) %>%
+    select(cell, compartment, clone) %>%
+    column_to_rownames('cell') %>%
+    `colnames<-`(c("compartment_LLR_2_ent_1", "clone_LLR_2_ent_1"))
+}) %>% bind_rows()
+
+integrated_data <- AddMetaData(integrated_data, cells_metadata_LLR_5_ent_0.5)
+integrated_data <- AddMetaData(integrated_data, cells_metadata_LLR_2_ent_1)
+
+integrated_data$compartment_LLR_5_ent_0.5[is.na(integrated_data$compartment_LLR_5_ent_0.5)] <- "normal"
+integrated_data$compartment_LLR_2_ent_1[is.na(integrated_data$compartment_LLR_2_ent_1)] <- "normal"
+```
+
+```{r}
+DimPlot(integrated_data, repel = T, label.box = T, label = T) + DimPlot(integrated_data, group.by = "compartment_LLR_5_ent_0.5", order = T) + DimPlot(integrated_data, group.by = "compartment_LLR_2_ent_1", order = T)
+```
+
+
+```{r}
+df <- integrated_data@meta.data %>% select(time_point, patient_id, compartment_LLR_5_ent_0.5)
+t1 <- df %>% filter(time_point == 1)
+t2 <- df %>% filter(time_point == 2)
+pt_t1 <- table(t1$patient_id, t1$compartment_LLR_5_ent_0.5) %>% as.data.frame.matrix()
+pt_t2 <- table(t2$patient_id, t2$compartment_LLR_5_ent_0.5) %>% as.data.frame.matrix()
+merge(pt_t1, pt_t2 , by = 0, suffixes = c("_t1","_t2")) %>%  column_to_rownames('Row.names') %>% DT::datatable()
+```
+
+```{r}
+DimPlot(integrated_data, group.by = "compartment_LLR_5_ent_0.5", order = T, split.by = "time_point")
+```
+
+```{r}
+DimPlot(integrated_data, repel = T, label.box = T, label = T) + DimPlot(integrated_data, group.by = "compartment_LLR_5_ent_0.5", order = T) + DimPlot(integrated_data, group.by = "compartment_LLR_2_ent_1", order = T)
+```
+
+```{r}
+df <- integrated_data@meta.data %>% select(time_point, patient_id, compartment_LLR_5_ent_0.5)
+t1 <- df %>% filter(time_point == 1)
+t2 <- df %>% filter(time_point == 2)
+pt_t1 <- table(t1$patient_id, t1$compartment_LLR_5_ent_0.5) %>% as.data.frame.matrix()
+pt_t2 <- table(t2$patient_id, t2$compartment_LLR_5_ent_0.5) %>% as.data.frame.matrix()
+merge(pt_t1, pt_t2 , by = 0, suffixes = c("_t1","_t2")) %>%  column_to_rownames('Row.names') -> tumor_fraction
+
+
+tumor_fraction %>%
+  rownames_to_column(var = 'sample_id') %>% 
+  reshape::melt(idvars = 'sample_id') %>%
+  group_by(sample_id) %>%
+  reframe(sample_id = sample_id,
+          compartment = variable, 
+          fraction = value / sum(value)) -> plot_df
+ggplot(plot_df, aes(x = sample_id, y = fraction, fill = compartment)) + geom_bar(stat = 'identity') + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+DT::datatable(tumor_fraction)
+# Extracting Numbat results for tumor pre and post treatment
+#pre <- Numbat$new("../OBJECT/numbat/6216-EC-1/", verbose = F)
+```
+
+```{r}
+## Subset patient object
+pt1475 <- subset(integrated_data, subset = patient_id == "1475")
+
+## Extracting Numbat results for tumor pre and post treatment
+t1 <- Numbat$new("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling/6216-EC-1", verbose = F)
+#t2 <- Numbat$new("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling/6873-EC-1", verbose = F)
+t3 <- Numbat$new("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling/9241-EC-1", verbose = F)
+```
+
+```{r}
+## Plotting CNV heatmaps
+
+t1_ann <- data.frame(cell = gsub("_3079-EC-2","", colnames(pt1475)), pt1475$Level1Labels)
+#t1_ann <- t1_ann %>% filter(cell %in% pre$joint_post$cell)
+#t1$plot_phylo_heatmap(clone_stack = TRUE, p_min = 0.9, annot = t1_ann) + ggtitle("pt1475_t1")
+t1$plot_clone_profile() + ggtitle("pt1475_t1")
+
+#t2$plot_clone_profile() + ggtitle("pt1475_t2")
+
+t3$plot_clone_profile() + ggtitle("pt1475_t3")
+
+```
+

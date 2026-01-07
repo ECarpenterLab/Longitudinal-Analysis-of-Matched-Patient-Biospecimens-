@@ -1,0 +1,323 @@
+---
+title: "12. Cell Chat with External Databases"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2025-12-09"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load object and libraries
+
+```{r}
+# loading libraries -------------------------------------------------------
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(CellChat)
+  library(tidyverse)
+  library(magrittr)
+  library(patchwork)
+  library(cowplot)
+  library(ComplexHeatmap)
+  library(ggplot2)
+})
+
+# loading data ------------------------------------------------------------
+longituindal_gol <- readRDS("../OBJECTS/integrated_merged_gol_passed_labels.rds")
+```
+
+# Pass Labels 
+
+```{r}
+#WntGenes <- c("WNT1", "WNT11", "WNT2", "WNT5A", "WNT3", "WNT3A", "WNT4", "WNT7B", "FZD1", "FZD8", "LRP6", "LRP1", "FZD2",
+           #"FZD5", "FZD7", "MCAM", "MYC", "AXIN2", "CTNNB1")
+#wnt2 <- c("RAC1", "DKK1", "PDK", "WNT2", "WNT5A", "CYCLIND1", "MYC", "AXIN2","LOX"
+          
+Idents(longituindal_gol) <- "patient_id"
+levels(longituindal_gol)
+Idents(longituindal_gol) <- "DiseaseState"
+levels(longituindal_gol)
+DefaultAssay(longituindal_gol) <- "CorrectedCounts"
+
+#cellchat first tumor samples only 
+longituindal_gol <- subset(longituindal_gol, idents = c("Healthy"), invert = TRUE)
+Idents(longituindal_gol) <- "patient_id"
+levels(longituindal_gol)
+Idents(longituindal_gol) <- "Level1Labels"
+levels(longituindal_gol)
+
+#TO NAME CLUSTERS:
+Idents(object = longituindal_gol) <- 'passed_level1labels'
+levels(longituindal_gol)
+
+
+NR_CAF <- subset(longituindal_gol, idents = c("agCAF"))
+Epithelial <- subset(longituindal_gol, idents = c("Epi"))
+```
+
+# Correlation Matrix of Ligand and Receptor Pairs
+```{r}
+#############Correlation Matrix other#####################################
+library(dplyr)
+library(pheatmap)
+
+NRCAF <- c("WNT5A", "WNT11", "NRP1", "NEGR1", "SEMA3A", "SEMA3C")
+EPI <- c("FZD5", "RYK", "ROR1", "ROR2", "NRP1", "VEGFA", "SEMA3B", "FGFR2")
+
+# Make sure you have loaded NR_CAF and Epithelial objects first
+DefaultAssay(NR_CAF) <- "CorrectedCounts"
+DefaultAssay(Epithelial) <- "CorrectedCounts"
+
+NRcaf_df <- as.data.frame(t(GetAssayData(NR_CAF, layer = "data")[NRCAF, ]))
+NRcaf_df$patient_id <- NR_CAF@meta.data$patient_id
+caf_avg <- NRcaf_df %>% group_by(patient_id) %>%
+  summarise(across(all_of(NRCAF), mean, na.rm=TRUE)) %>%
+  rename_with(~paste0(.x, "_NRCAF"), .cols = NRCAF)
+
+epi_df <- as.data.frame(t(GetAssayData(Epithelial, layer = "data")[EPI, ]))
+epi_df$patient_id <- Epithelial@meta.data$patient_id
+epi_avg <- epi_df %>% group_by(patient_id) %>%
+  summarise(across(all_of(EPI), mean, na.rm=TRUE)) %>%
+  rename_with(~paste0(.x, "_EPI"), .cols = EPI)
+
+merged <- inner_join(caf_avg, epi_avg, by="patient_id")
+
+caf_cols <- intersect(paste0(NRCAF, "_NRCAF"), colnames(merged))
+epi_cols <- intersect(paste0(EPI, "_EPI"), colnames(merged))
+
+nonzero_caf <- caf_cols[sapply(caf_cols, function(g) {
+  vals <- merged[[g]]
+  is.numeric(vals) && sum(!is.na(vals)) > 1 && var(vals, na.rm = TRUE) != 0
+})]
+nonzero_epi <- epi_cols[sapply(epi_cols, function(g) {
+  vals <- merged[[g]]
+  is.numeric(vals) && sum(!is.na(vals)) > 1 && var(vals, na.rm = TRUE) != 0
+})]
+
+cor_matrix <- matrix(NA, nrow = length(nonzero_epi), ncol = length(nonzero_caf),
+                     dimnames = list(nonzero_epi, nonzero_caf))
+for(i in seq_along(nonzero_caf)){
+  for(j in seq_along(nonzero_epi)){
+    x <- merged[[nonzero_caf[i]]]
+    y <- merged[[nonzero_epi[j]]]
+    if(is.numeric(x) && is.numeric(y) && !all(is.na(x)) && !all(is.na(y))){
+      cor_matrix[j, i] <- cor(x, y, use = "pairwise.complete.obs")
+    }
+  }
+}
+
+# Remove any all-NA rows/cols
+cor_matrix <- cor_matrix[rowSums(!is.na(cor_matrix)) > 0, colSums(!is.na(cor_matrix)) > 0]
+pheatmap(cor_matrix, cluster_rows = FALSE, cluster_cols = FALSE)
+
+pheatmap(
+  cor_matrix,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  display_numbers = round(cor_matrix, 2),
+  breaks = seq(-1, 1, length.out = 101) # scale from -1 to +1, default colors
+)
+```
+
+```{r}
+#############Correlation Matrix NRP1#####################################
+library(dplyr)
+library(pheatmap)
+
+NRCAF <- c("NRP1", "SEMA3C", "SEMA3B", "NEGR1")
+EPI <- c("VEGFA", "SEMA3B", "SEMA3A", "NRP1", "SEMA3C", "PLXND1", "FGFR2")
+
+# Make sure you have loaded NR_CAF and Epithelial objects first
+DefaultAssay(NR_CAF) <- "CorrectedCounts"
+DefaultAssay(Epithelial) <- "CorrectedCounts"
+
+NRcaf_df <- as.data.frame(t(GetAssayData(NR_CAF, layer = "data")[NRCAF, ]))
+NRcaf_df$patient_id <- NR_CAF@meta.data$patient_id
+caf_avg <- NRcaf_df %>% group_by(patient_id) %>%
+  summarise(across(all_of(NRCAF), mean, na.rm=TRUE)) %>%
+  rename_with(~paste0(.x, "_NRCAF"), .cols = NRCAF)
+
+epi_df <- as.data.frame(t(GetAssayData(Epithelial, layer = "data")[EPI, ]))
+epi_df$patient_id <- Epithelial@meta.data$patient_id
+epi_avg <- epi_df %>% group_by(patient_id) %>%
+  summarise(across(all_of(EPI), mean, na.rm=TRUE)) %>%
+  rename_with(~paste0(.x, "_EPI"), .cols = EPI)
+
+merged <- inner_join(caf_avg, epi_avg, by="patient_id")
+
+caf_cols <- intersect(paste0(NRCAF, "_NRCAF"), colnames(merged))
+epi_cols <- intersect(paste0(EPI, "_EPI"), colnames(merged))
+
+nonzero_caf <- caf_cols[sapply(caf_cols, function(g) {
+  vals <- merged[[g]]
+  is.numeric(vals) && sum(!is.na(vals)) > 1 && var(vals, na.rm = TRUE) != 0
+})]
+nonzero_epi <- epi_cols[sapply(epi_cols, function(g) {
+  vals <- merged[[g]]
+  is.numeric(vals) && sum(!is.na(vals)) > 1 && var(vals, na.rm = TRUE) != 0
+})]
+
+cor_matrix <- matrix(NA, nrow = length(nonzero_epi), ncol = length(nonzero_caf),
+                     dimnames = list(nonzero_epi, nonzero_caf))
+for(i in seq_along(nonzero_caf)){
+  for(j in seq_along(nonzero_epi)){
+    x <- merged[[nonzero_caf[i]]]
+    y <- merged[[nonzero_epi[j]]]
+    if(is.numeric(x) && is.numeric(y) && !all(is.na(x)) && !all(is.na(y))){
+      cor_matrix[j, i] <- cor(x, y, use = "pairwise.complete.obs")
+    }
+  }
+}
+
+# Remove any all-NA rows/cols
+cor_matrix <- cor_matrix[rowSums(!is.na(cor_matrix)) > 0, colSums(!is.na(cor_matrix)) > 0]
+pheatmap(cor_matrix, cluster_rows = FALSE, cluster_cols = FALSE)
+
+pheatmap(
+  cor_matrix,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  display_numbers = round(cor_matrix, 2),
+  breaks = seq(-1, 1, length.out = 101) # scale from -1 to +1, default colors
+)
+```
+
+# Cell Chat
+```{r}
+#CELL CHAT##
+
+# subset out smaller and contaminating cell populations. They will not be part of the analysis.
+table(Idents(longituindal_gol))
+merged <- subset(longituindal_gol, idents = c("CD4T", "CD8T", "Granulocyte", "Epi", "B-Cell", "Macrophage", "Pericyte", "NK", "Endothelial", "TReg", "CAF", "agCAF"))
+
+Idents(merged) <- "passed_level1labels"
+levels(merged)
+
+DefaultAssay(merged) <- "CorrectedCounts"
+#You will want to make sure your data is normalized
+merged_longitudinal <- NormalizeData(merged)
+merged_longitdudinal <- ScaleData(merged)
+```
+## Create the CellChat Object------------------------------------
+```{r}
+cellChat <- createCellChat(object = merged_longitudinal, group.by = "passed_level1labels", assay = "CorrectedCounts")
+
+rm(merged_longitudinal)
+rm(merged)
+
+CellChat.list <- list(cellChat)
+CellChatDB <- CellChatDB.human
+```
+
+## Running CellChat --------------------------------------------------------
+```{r}
+#Level1Labels should be the metadata 
+CellChat.list <- lapply(CellChat.list, function(x){
+  x@DB <- CellChatDB
+  cellchat <- subsetData(x)
+  cellchat <- identifyOverExpressedGenes(cellchat)
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  cellchat@meta$passed_level1labels <- factor(cellchat@meta$passed_level1labels)
+  cellchat@meta$passed_level1labels <- droplevels(cellchat@meta$passed_level1labels,
+                                        exclude = setdiff(levels(cellchat@meta$passed_level1labels),unique(as.character(cellchat@meta$passed_level1labels))))
+  cellchat@idents <- cellchat@meta$passed_level1labels
+  cellchat <- computeCommunProb(cellchat)
+  cellchat <- filterCommunication(cellchat, min.cells = 10)
+  cellchat <- computeCommunProbPathway(cellchat)
+  cellchat <- aggregateNet(cellchat)
+  return(cellchat)
+})
+
+CellChat.list 
+#saveRDS(CellChat.list, "../OBJECTS/GOL_CELL_CHAT_LIST_tumor_onlt.rds")
+```
+
+## Plotting cell chat results
+```{r}
+#CellChat.list <- readRDS("../OBJECTS/GOL_CELL_CHAT_LIST_tumor_onlt.rds")
+
+T1 <- CellChat.list[[1]]
+
+# Interaction Weight / Strength -------------------------------------------
+
+## cell-cell communication strength tables
+T1@net$weight 
+
+## Plotting communication strength
+netVisual_circle(T1@net$weight, vertex.weight = as.numeric(table(T1@idents)), arrow.size = 0.1,
+                 weight.scale = T, label.edge= F, title.name = "T1 interaction strength", margin = 0.01)
+
+netVisual_heatmap(T1, measure = "count", color.heatmap = "Reds",  title.name = "Number of interactions T1")
+
+#Merge the two cell chat objects for comparative analysis
+#T1pathways.show.all <- T1@netP$pathways
+#pathways <- as.data.frame(T1pathways.show.all)
+T1 <- netAnalysis_computeCentrality(T1, slot.name = "netP")
+CellChat <- T1
+CellChat@options$datatype <- "CorrectedCounts"
+
+CellChat <- netAnalysis_computeCentrality(CellChat)
+netVisual_circle(T1@net$weight, vertex.weight = as.numeric(table(T1@idents)), arrow.size = 0.1,
+                 weight.scale = T, label.edge= F, title.name = "T1 interaction strength", margin = 0.01)
+```
+
+# Pathway Specific Plots
+```{r}
+#pathways.show.all <- T1@netP$pathways #view all possible pathways 
+#pathways.show.all
+cytokines <- c("CXCL", "CCL", "CX3C")
+neural <- c("NEGR", "SLIT", "Netrin", "SEMA3", "SEMA4", "SEMA6")
+ecm <- c("COLLAGEN", "TGFb", "FN1", "VEGF", "FGF")
+WNT <- c("NOTCH", "BMP", "TGFb", "FGF", "EGF", "IGF", "PDGF", "VEGF", "ncWNT")
+
+levels(T1@idents)
+netVisual_chord_gene(T1, signaling = c("ncWNT"), sources.use = c(4,11,12), targets.use = c(4,11,12), lab.cex = 0.5,legend.pos.y = 30)
+netVisual_chord_gene(T1, signaling = WNT, sources.use = c(4,11,12), targets.use = c(4,11,12), lab.cex = 0.5,legend.pos.y = 30)
+netVisual_chord_gene(T1, signaling = neural, sources.use = c(4,11,12), targets.use = c(4,11,12), lab.cex = 0.5,legend.pos.y = 30)
+netVisual_chord_gene(T1, signaling = WNT, sources.use = c(4,11,12), targets.use = c(4,11,12), lab.cex = 0.5,legend.pos.y = 30)
+```
+
+```{r}
+levels(T1@idents)
+netVisual_chord_gene(T1, signaling = neural, lab.cex = 0.5,legend.pos.y = 30)
+netVisual_chord_gene(T1, signaling = ecm, lab.cex = 0.5,legend.pos.y = 30)
+
+levels(T1@idents)
+netVisual_bubble(T1, sources.use = c(11,12), signaling = c("MPZ", "LAMININ", "COLLAGEN", "NECTIN", "APP", "HGF", "CXCL", "FGF", "NEGR", "TGFb"),
+                 targets.use = c(4), angle.x = 45, remove.isolate = FALSE)
+
+df.net <- subsetCommunication(T1, slot.name = "net")
+#write.csv(df.net, "../DATA_FILES/communication_ligand_receptor_pairs.csv")
+```

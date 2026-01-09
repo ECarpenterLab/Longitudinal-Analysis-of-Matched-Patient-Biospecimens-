@@ -1,0 +1,144 @@
+---
+title: "10_Cell Chat Longitduinal Overall"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2025-12-09"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load object and libraries
+```{r, warning=FALSE, message=FALSE}
+suppressPackageStartupMessages({
+# loading libraries -------------------------------------------------------
+  library(Seurat)
+  library(CellChat)
+  library(tidyverse)
+  library(magrittr)
+  library(patchwork)
+})
+
+# loading data ------------------------------------------------------------
+
+CellChatDB <- CellChatDB.human
+longitudinal <- readRDS("../OBJECTS/eileen_annotated_longitudinal.rds")
+# Creating tumor and healthy subsets --------------------------------------
+```
+# Prepare Data
+```{r, warning=FALSE, message=FALSE}
+Idents(longitudinal) <- "Level1Labels"
+levels(longitudinal)
+DimPlot(longitudinal)
+longitudinal$samples <- longitudinal$sample_id
+
+integratedData.list <- SplitObject(longitudinal, split.by = "time_point")
+remove(longitudinal)
+```
+# Creating CellChat Object 
+```{r, warning=FALSE, message=FALSE}
+
+assayUsed <- 'CorrectedCounts'
+CellChat.list <- lapply(integratedData.list, function(x){
+  CellChat_obj <- createCellChat(object = GetAssayData(x, assay = assayUsed, slot = "data"),
+                                 meta = x@meta.data,
+                                 group.by = "Level1Labels")
+})
+remove(integratedData.list)
+```
+# Running CellChat 
+```{r, warning=FALSE, message=FALSE}
+CellChat.list <- lapply(CellChat.list, function(x){
+  x@DB <- CellChatDB
+  cellchat <- subsetData(x)
+  cellchat <- identifyOverExpressedGenes(cellchat)
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  cellchat@meta$Level1Labels <- factor(cellchat@meta$Level1Labels)
+  cellchat@meta$Level1Labels <- droplevels(cellchat@meta$Level1Labels,
+                                            exclude = setdiff(levels(cellchat@meta$Level1Labels),unique(as.character(cellchat@meta$Level1Labels))))
+  cellchat@idents <- cellchat@meta$Level1Labels
+  cellchat <- computeCommunProb(cellchat)
+  cellchat <- filterCommunication(cellchat, min.cells = 10)
+  cellchat <- computeCommunProbPathway(cellchat)
+  cellchat <- aggregateNet(cellchat)
+  return(cellchat)
+})
+```
+# Plotting CellChat Overall
+
+## Splitting objects
+```{r, warning=FALSE, message=FALSE}
+T1 <- CellChat.list[[1]]
+T2 <- CellChat.list[[2]]
+```
+## Interaction Weight / Strength 
+### cell-cell communication strength tables
+```{r, warning=FALSE, message=FALSE}
+T1@net$weight 
+T2@net$weight 
+```
+### Plotting communication strength
+```{r, warning=FALSE, message=FALSE}
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(T1@net$weight, vertex.weight = as.numeric(table(T1@idents)), arrow.size = 0.1,
+                 weight.scale = T, label.edge= F, title.name = "T1 interaction strength", margin = 0.01)
+netVisual_circle(T2@net$weight, vertex.weight = as.numeric(table(T2@idents)), arrow.size = 0.1,
+                 weight.scale = T, label.edge= F, title.name = "T2 interaction strength", margin = 0.01)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+netVisual_heatmap(T1, measure = "count", color.heatmap = "Reds",  title.name = "Number of interactions T1")+netVisual_heatmap(T2, measure = "count", color.heatmap = "Reds", title.name = "Number of interactions T2")
+```
+## Compute the network cent=rality scores
+```{r, warning=FALSE, message=FALSE}
+T1 <- netAnalysis_computeCentrality(T1, slot.name = "netP")
+T2 <- netAnalysis_computeCentrality(T2,slot.name = "netP")
+
+pathways.show.all <- T1@netP$pathways #view all possible pathways 
+pathways.show.all
+levels(T1@idents)
+```
+
+# Plotting Specific Pathways in Cell Chat
+```{r, warning=FALSE, message=FALSE}
+pathways <- c("CXCL", "CCL", "THY1", "MIF", "CD6","IL2", "IL4", "MHC-I")
+
+par(mfrow = c(1,2), xpd=TRUE)
+
+netVisual_chord_gene(T1, signaling = pathways, sources.use = c(1,2,3,4,5,6,8), targets.use = c(2,6), lab.cex = 0.5,legend.pos.y = 30)
+netVisual_chord_gene(T2, signaling = pathways, sources.use = c(1,2,3,4,5,6,8), targets.use = c(2,6), lab.cex = 0.5,legend.pos.y = 30)
+dev.off()
+
+```

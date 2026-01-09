@@ -1,0 +1,555 @@
+---
+title: "11. Merging External Datasets and Integrating Pt. 1"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2025-12-09"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load object and libraries
+
+```{r, warning=FALSE, message=FALSE}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(DT)
+  library(cowplot)
+  library(patchwork)
+  library(AUCell)
+})
+
+longitduinal <- readRDS("../OBJECTS/eileen_annotated_longitudinal.rds")
+gift_of_life_full<- readRDS("../OBJECTS/integrated_data_realigned_hg38.rds")
+```
+
+# Prepare Data and Set Correct Metadata
+```{r, eval = FALSE}
+DefaultAssay(longitduinal) <- "CorrectedCounts"
+DefaultAssay(gift_of_life_full) <- "CorrectedCounts"
+
+gift_of_life_full$sample_id <- gift_of_life_full$sample_name
+
+gift_of_life_full$Level1Labels <- gift_of_life_full$cell_types
+Idents(gift_of_life_full) <- "Level1Labels"
+```
+
+# Merge Objects
+```{r, eval =FALSE, warning=FALSE}
+merged_object <- merge(longitduinal, gift_of_life_full)
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#saveRDS(merged_object, "../OBJECTS/merged_longitduinal_GoL.rds")
+
+merged_object <- readRDS("../OBJECTS/merged_longitduinal_GoL.rds")
+```
+
+# Inetgrate Objects and Pass Labels
+```{r, warning=FALSE, eval=FALSE}
+DefaultAssay(merged_object) <- 'CorrectedCounts'
+
+samples.list <- SplitObject(merged_object, split.by = "sample_id")
+samples.list <- lapply(X = samples.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+rm(merged_object)
+gc()
+```
+## remove samples with less than 100 cells
+```{r, eval = FALSE}
+samples.list <- samples.list[-3]
+
+features <- SelectIntegrationFeatures(object.list = samples.list)
+samples.list <- lapply(X = samples.list, FUN = function(x) {
+  x <- ScaleData(x, features = features, verbose = FALSE)
+  x <- RunPCA(x, features = features, verbose = FALSE)
+})
+
+anchors <- FindIntegrationAnchors(object.list = samples.list, anchor.features = features, reduction = "rpca",assay = rep("CorrectedCounts", length(samples.list)))
+
+Integrated_Dataset <- IntegrateData(anchorset = anchors)
+```
+
+## Normalize and Cluster
+```{r, eval=FALSE}
+DefaultAssay(Integrated_Dataset) <- "CorrectedCounts"
+Integrated_Dataset <- FindVariableFeatures(Integrated_Dataset, selection.method = "vst", nfeatures = 2000)
+Integrated_Dataset <- ScaleData(Integrated_Dataset, verbose = FALSE)
+Integrated_Dataset <- RunPCA(Integrated_Dataset, verbose = FALSE)
+Integrated_Dataset <- RunUMAP(Integrated_Dataset, reduction = "pca", dims = 1:20, reduction.name = 'unintegrated_umap')
+
+DefaultAssay(Integrated_Dataset) <- "integrated"
+Integrated_Dataset <- ScaleData(Integrated_Dataset, verbose = FALSE)
+Integrated_Dataset <- RunPCA(Integrated_Dataset, verbose = FALSE)
+Integrated_Dataset <- RunUMAP(Integrated_Dataset, reduction = "pca", dims = 1:25, reduction.name = 'integrated_umap')
+Integrated_Dataset <- FindNeighbors(Integrated_Dataset, reduction = "pca", dims = 1:25)
+Integrated_Dataset <- FindClusters(Integrated_Dataset, resolution = 1.8)
+
+Integrated_Dataset[["UMAP_Clusters"]] <- Idents(object = Integrated_Dataset)  
+#saveRDS(Integrated_Dataset, "../OBJECTS/integrated_merged_datasets_longitduinal_hg38_GOL.rds")
+```
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+Integrated_Dataset <- readRDS("../OBJECTS/integrated_merged_datasets_longitduinal_hg38_GOL.rds")
+```
+
+```{r, warning=FALSE, message=FALSE}
+Idents(Integrated_Dataset) <- 'sample_id'
+levels(Integrated_Dataset)
+p1 <- DimPlot(Integrated_Dataset,  reduction = "integrated_umap",  group.by = c("sample_id"),) + NoLegend()
+p2 <- DimPlot(Integrated_Dataset,  reduction = "unintegrated_umap",  group.by = c("sample_id"))
+p1+p2
+
+Idents(Integrated_Dataset) <- "Level1Labels"
+levels(Integrated_Dataset)
+p1 <- DimPlot(Integrated_Dataset,  reduction = "integrated_umap",  group.by = c("Level1Labels")) + NoLegend()  
+p2 <- DimPlot(Integrated_Dataset,  reduction = "unintegrated_umap",  group.by = c("Level1Labels"))
+p1+p2
+
+Idents(Integrated_Dataset) <- "UMAP_Clusters"
+DimPlot(Integrated_Dataset, reduction = "integrated_umap", label = TRUE)
+```
+
+```{r, eval = FALSE}
+markers <- FindAllMarkers(Integrated_Dataset, assay = "CorrectedCounts", min.pct = 0.25, only.pos = T) 
+
+#write.csv(markers, "../DATA_FILES/MERGED_GOL_FULL_CLUSTER_MARKER_LIST.csv")
+```
+
+```{r, warning=FALSE, message=FALSE}
+# TO NAME CLUSTERS:
+Idents(object = Integrated_Dataset) <- 'UMAP_Clusters'
+levels(Integrated_Dataset)
+current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62)
+new.cluster.ids <- c('CD4T', 'CD8T', 'Acinar', 'Granulocyte', 'Epi', 'Granulocyte', 'Epi', 'Acinar', 'B-Cell', 'Epi', 'Macrophage', 'Epi', 'Macrophage', 'Fibroblast', 'CD4T', 'CD8T', 'Pericyte', 'Granulocyte', 'CD8T', 'Granulocyte', 'NK', 'Macrophage', 'Fibroblast', 'Acinar', 'Macrophage', 'Macrophage', 'Acinar', 'Mast', 'Cycling', 'Endothelial', 'Fibroblast', 'Endothelial', 'Epi', 'Acinar', 'Plasma','Granulocyte', 'Macrophage', 'Macrophage', 'Acinar', 'Acinar','Fibroblast','Macrophage', 'Acinar', "Epi", 'Macrophage', 'Acinar', 'TReg', 'Endothelial', 'Epi', 'Macrophage', 'Epi', 'Epi', 'Epi', 'Pericyte', 'Endothelial', 'Plasma', 'NK', 'Epi', 'Epi', 'Plasma', 'Platelet', 'Granulocyte', 'CD8T')
+names(x = new.cluster.ids) <- levels(x = Integrated_Dataset)
+Integrated_Dataset <- RenameIdents(object = Integrated_Dataset, new.cluster.ids)
+Integrated_Dataset[["Merged_Level1Labels"]] <- Idents(object = Integrated_Dataset)
+```
+
+## Create new metadata now
+```{r, warning=FALSE, message=FALSE}
+Idents(Integrated_Dataset) <- 'sample_id'
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '3079-EC-2'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '6894-EC-1'] <- "Treated Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4358-EC-1'] <- "Treated Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '5392-EC-1'] <- "Treated Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4425-EC-1'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '6873-EC-1'] <- "Treated Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '5161-EC-1'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '6216-EC-1'] <- "Treated Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '5570-EC-1'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '6846-EC-1'] <- "Treated Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '3829-EC'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '3861-EC'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '3862-EC'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4160-EC'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4161-EC'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4346-EC'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4347-EC'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4637-EC-1'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4637-EC-2'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4741-EC-1'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '4741-EC-2'] <- "Healthy"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '119833'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '125796'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '135041'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '125421'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '126197'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '123798'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '127260'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '130289'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '130450'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '130840'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '130742'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '135040'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '135156'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '137333'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '135334'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '135714'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '136365'] <- "Treatment Naive Tumor"
+Integrated_Dataset$DiseaseState[Integrated_Dataset$sample_id == '136687'] <- "Treatment Naive Tumor"
+Idents(Integrated_Dataset) <- "DiseaseState"
+#saveRDS(Integrated_Dataset, "Integrated_Final_GOL_Longitudinal_Merge.rds")
+```
+
+# Subset Fibroblasts
+```{r, warning=FALSE, message=FALSE}
+Idents(Integrated_Dataset) <- "Merged_Level1Labels"
+FIBROS <- subset(Integrated_Dataset, idents = c('Fibroblast'))
+
+#Integrated Data set is everything
+#tumor_only is tumor only fibroblasts
+#FIBROS is all fibroblasts including healthy
+```
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(FIBROS) <- 'CorrectedCounts'
+DimPlot(FIBROS, reduction = "integrated_umap")
+
+Idents(FIBROS) <- "DiseaseState"
+levels(FIBROS)
+tumor_only <- subset(FIBROS, idents = c("Treatment Naive Tumor", "Treated Tumor"))
+Idents(tumor_only) <- "DiseaseState"
+levels(tumor_only)
+```
+
+## Compare overall treatment naive tumor and treated tumor. 
+```{r, warning=FALSE, message=FALSE}
+library(ggpubr)
+VlnPlot(tumor_only, feature = c("ACTA2"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(tumor_only, feature = c("NEGR1"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(tumor_only, feature = c("NFIA"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(tumor_only, feature = c("NRP1"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(tumor_only, feature = c("SLIT2"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(tumor_only, feature = c("EPHA3"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+```
+
+## Create new metadata to break it down to just tumor and just healthy regardless of treatment status
+```{r, warning=FALSE, message=FALSE}
+FIBROS$tumor_type <- ifelse(
+  FIBROS$DiseaseState == "Healthy", 
+  "Healthy", 
+  ifelse(FIBROS$DiseaseState %in% c("Treatment Naive Tumor", "Treated Tumor"), "PDAC", NA)
+)
+
+Idents(FIBROS) <- "tumor_type"
+levels(FIBROS)
+FIBROS$tumor_type <- factor(FIBROS$tumor_type, levels = c("Healthy", "PDAC"))
+FIBROS <- subset(FIBROS, idents = c("PDAC", "Healthy"))
+#now compare healthy & tumor in full object
+library(ggpubr)
+VlnPlot(FIBROS, feature = c("ACTA2"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("NEGR1"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("NFIA"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("NRP1"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("SLIT2"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("EPHA3"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("TAGLN"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("DPT"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("LRRC15"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("FAP"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("CXCL12"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("PDGFRA"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("PDGFRB"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("PDPN"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, feature = c("LEF1"), pt.size = 0) + stat_compare_means(method = "wilcox.test")
+```
+
+## look at NR-CAF signature in full object
+```{r, warning=FALSE, message=FALSE}
+FeaturePlot(FIBROS, reduction = "integrated_umap", features = c("NEGR1"))
+FeaturePlot(FIBROS, reduction = "integrated_umap", features = c("NRP1"))
+FeaturePlot(FIBROS, reduction = "integrated_umap", features = c("ACTA2"))
+FeaturePlot(FIBROS, reduction = "integrated_umap", features = c("EPHA3"))
+FeaturePlot(FIBROS, reduction = "integrated_umap", features = c("SEMA3A"))
+FeaturePlot(FIBROS, reduction = "integrated_umap", features = c("ROBO1"))
+FeaturePlot(FIBROS, reduction = "integrated_umap", features = c("NFIA"))
+
+#########################################################################################
+```
+
+## Apply NR-CAF signature to CAFs only *tumor_only*, apply them to FIBROS too
+```{r, warning=FALSE, message=FALSE}
+AGF <- c("NEGR1", "NRP1", "NFIA", "EPHA3", "SLIT2", "SEMA3A", "ROBO1")
+
+library(readxl)
+library(AUCell)
+
+mycaf_icaf <- read_excel("../GENE_SIGNATURES//MYCAF_ICAF.xlsx")
+mycaf <- mycaf_icaf$mycaf
+icaf <- mycaf_icaf$icaf
+apcaf <- mycaf_icaf$apcaf
+
+AGF <- c("NEGR1", "SLIT2", "ROBO1", "NFIA", "NRP1", "SEMA3A", "EPHA3")
+AGF_metadata <- list(
+  AGF = AGF
+)
+
+mycaf_icaf <- list(
+  
+  mycaf = mycaf,
+  apcaf = apcaf,
+  icaf = icaf
+)
+
+expr <- GetAssayData(tumor_only,
+                     assay = "CorrectedCounts",
+                     layer = "counts")
+
+
+expr2 <- GetAssayData(FIBROS,
+                     assay = "CorrectedCounts",
+                     layer = "counts")
+agf <- list(
+  
+  agf = AGF
+)
+library(SummarizedExperiment)
+library(RColorBrewer)
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+geneRanking2 <- AUCell_buildRankings(expr2, nCores = 36, splitByBlocks = TRUE)
+
+auc_score <- AUCell_calcAUC(rankings = geneRanking, geneSets = agf, aucMaxRank = nrow(geneRanking)*0.1)
+auc_score_2 <- AUCell_calcAUC(rankings = geneRanking, geneSets = mycaf_icaf, aucMaxRank = nrow(geneRanking)*0.1)
+auc_score <- as.data.frame(t(assay(c(auc_score))))
+auc_score_scaled <- as.data.frame(scale(auc_score))
+auc_score_2 <- as.data.frame(t(assay(c(auc_score_2))))
+auc_score_scaled_2 <- as.data.frame(scale(auc_score_2))
+
+auc_score_3 <- AUCell_calcAUC(rankings = geneRanking2, geneSets = agf, aucMaxRank = nrow(geneRanking2)*0.1)
+auc_score_4 <- AUCell_calcAUC(rankings = geneRanking2, geneSets = mycaf_icaf, aucMaxRank = nrow(geneRanking2)*0.1)
+auc_score_3 <- as.data.frame(t(assay(c(auc_score_3))))
+auc_score_scaled_3 <- as.data.frame(scale(auc_score_3))
+auc_score_4 <- as.data.frame(t(assay(c(auc_score_4))))
+auc_score_scaled_4 <- as.data.frame(scale(auc_score_4))
+
+tumor_only <- AddMetaData(tumor_only, metadata = auc_score_scaled)
+tumor_only <- AddMetaData(tumor_only, metadata = auc_score_scaled_2)
+
+FIBROS <- AddMetaData(FIBROS, metadata = auc_score_scaled_3)
+FIBROS <- AddMetaData(FIBROS, metadata = auc_score_scaled_4)
+```
+
+## Create the plot object and display it in the console
+```{r, warning=FALSE, message=FALSE}
+#check number of cells
+table(tumor_only@meta.data$orig.ident)
+table(FIBROS@meta.data$orig.ident)
+plot <- FeaturePlot(tumor_only, features = c("mycaf", "icaf", "apcaf", "agf"), reduction = "integrated_umap", label = FALSE, repel = TRUE) & 
+scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+print(plot)
+
+DimPlot(FIBROS, reduction = "integrated_umap", split.by = 'DiseaseState')
+FeaturePlot(FIBROS, features = c('NEGR1'), split.by = "DiseaseState")        
+FeaturePlot(FIBROS, features = c('ACTA2'), split.by = "DiseaseState")   
+```
+
+# Remove healthy patients
+```{r, warning=FALSE, message=FALSE}
+agf_threshold <- quantile(FIBROS$agf, 0.75)  # top 25%
+# 2. Create a new metadata column
+FIBROS$agf <- ifelse(FIBROS$agf >= agf_threshold, "agCAF", "CAF")
+# Check distribution
+ag_caf_cafs <- table(FIBROS$agf, FIBROS$patient_id)
+print(ag_caf_cafs)
+```
+
+# Pass NR-CAF labels to object
+```{r, warning=FALSE, message=FALSE}
+FIBROS$passed_level1labels <- FIBROS$agf
+Idents(FIBROS) <- "passed_level1labels"
+levels(FIBROS)
+#now we created metadata with all of the cell types 
+Idents(Integrated_Dataset) <- "Merged_Level1Labels" 
+levels(Integrated_Dataset)
+Integrated_Dataset_nofibro <- subset(Integrated_Dataset, idents = c("Fibroblast"), invert = TRUE)
+Idents(Integrated_Dataset_nofibro) <- "Merged_Level1Labels"
+Integrated_Dataset_nofibro$passed_level1labels <- Integrated_Dataset_nofibro$Merged_Level1Labels
+#passing all labels to main integrated data set 
+passed_level1labels <- rbind(Integrated_Dataset_nofibro@meta.data %>% select(passed_level1labels), FIBROS@meta.data %>% select(passed_level1labels))
+aligned_labels <- passed_level1labels[rownames(Integrated_Dataset@meta.data), ]
+Integrated_Dataset@meta.data$passed_level1labels <- aligned_labels
+Idents(Integrated_Dataset) <- "passed_level1labels"
+
+#changing colors of the umap
+cols <- c(
+  "CD8T"        = "aquamarine2", 
+  "CD4T"        = "coral1",
+  "TReg"        = "sienna3",
+  "Cycling"     = "violetred",
+  "Pericyte"    = "lavender",
+  "Platelet"    = "brown",
+  "Macrophage"  = "peachpuff", 
+  "Mast"        = "chartreuse1", 
+  "NK"          = "seagreen4", 
+  "B-Cell"      = "lightskyblue1",   # fixed here
+  "Plasma"      = "dodgerblue3", 
+  "CAF"         = "goldenrod", 
+  "Endothelial" = "pink", 
+  "Epi"         = "mediumorchid4",
+  "Granulocyte" = "wheat3",
+  "Acinar"      = "thistle",
+  "agCAF"       = "magenta")
+```
+
+```{r, warning=FALSE, message=FALSE}
+DimPlot(Integrated_Dataset, reduction = "integrated_umap", label = F, cols = cols)
+```
+
+# Removing healthy tissue again
+```{r, warning=FALSE, message=FALSE}
+##############Removing Healthy Tissue from Merged Database - Tumor Only#############################
+Idents(Integrated_Dataset) <- "DiseaseState"
+cancer_patients <- subset(Integrated_Dataset, idents = c("Treatment Naive Tumor", "Treated Tumor"))
+Idents(cancer_patients) <- "passed_level1labels"
+levels(cancer_patients)
+DimPlot(cancer_patients, reduction = "integrated_umap", label = F, cols = cols)
+table(cancer_patients@meta.data$orig.ident)
+```
+
+# Looking at expression of Ligand-Receptor Pairs
+```{r, warning=FALSE, message=FALSE}
+##############Identifying common LR Pairs#############################
+Idents(cancer_patients) <- "passed_level1labels"
+
+CELLS_INTEREST <- subset(cancer_patients, idents = c("Acinar", "Platelet", "Cycling", "Mast"), invert=TRUE)
+
+DefaultAssay(CELLS_INTEREST) <- "CorrectedCounts"
+NRP1 <- c("NRP1", "VEGFA",
+           "SEMA3B", "SEMA3A", "SEMA3C", "PLXND1")
+
+nc_WNT <- c("WNT5A", "WNT11",
+         "FZD2", "FZD5", "FZD7",
+         "ROR1", "ROR2", "RYK")
+
+c_WNT <- c("WNT2", "WNT2B","WNT7A", "WNT3A", 
+           "WNT7B", "WNT9A", "WNT10A",
+           "FZD2", "FZD4", "FZD5", "FZD7", "FZD1", "FZD8", "LRP5", "LRP6")
+
+hedgehog <- c("SHH", "DHH", "IHH", "PTCH1", "PTCH2")
+
+NEGR1 <- c("NEGR1", "ADAM10", "FGFR2"
+           )
+library(RColorBrewer)
+DotPlot(object = CELLS_INTEREST, features = NEGR1, scale = TRUE) + theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle=45, size=10, hjust=1)
+  ) + scale_color_gradientn(
+    colours = rev(brewer.pal(n = 11, name = "RdYlBu"))
+  )
+
+```
+
+# Differential Expression and Pathway Analysis
+```{r, warning=FALSE, message=FALSE}
+Idents(cancer_patients) <- "passed_level1labels"
+FIBROS <- subset(cancer_patients, ideant = c("CAF", "agCAF"))
+Idents(FIBROS) <- "passed_level1labels"
+levels(FIBROS)
+
+agf.markers <- FindMarkers(FIBROS, ident.1 = "agCAF", ident.2 = "CAF", assay = "RNA", test.use = "MAST", verbose = FALSE, recorrect_umi = FALSE, logfc.threshold = 0)
+```
+
+## KEGG Reactome
+```{r, eval = FALSE, warning=FALSE, message=FALSE}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+up_in_t1 <- agf.markers %>%
+  filter(avg_log2FC > 0 )
+
+down_in_t1 <- agf.markers %>%
+  filter(avg_log2FC < 0)
+
+up_ids <- bitr(up_in_t1$gene, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
+down_ids <- bitr(down_in_t1$gene, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
+
+up_kegg <- enrichKEGG(gene=up_ids$ENTREZID, organism="hsa", pvalueCutoff=0.05)
+down_kegg <- enrichKEGG(gene=down_ids$ENTREZID, organism="hsa", pvalueCutoff=0.05)
+
+up_df <- as.data.frame(up_kegg)
+down_df <- as.data.frame(down_kegg)
+
+up_df$direction <- "Down in T1"
+down_df$direction <- "Up in T1"
+
+up_df$enrichment_score <- -log10(up_df$p.adjust)
+down_df$enrichment_score <- log10(down_df$p.adjust)
+
+combined_df <- bind_rows(up_df, down_df) %>%
+  filter(!is.infinite(enrichment_score)) %>%
+  arrange(desc(abs(enrichment_score))) %>%
+  slice(1:50)  # adjust number of categories shown
+
+# Plot
+ggplot(combined_df, aes(x = reorder(Description, enrichment_score), y = enrichment_score, fill = direction)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = c("Up in T1" = "blue", "Down in T1" = "red")) +
+  labs(title = "KEGG Pathways Enriched in T3",
+       x = "Pathway", y = "Signed -log10(adjusted p-value)") +
+  theme_minimal(base_size = 14)
+```
+
+# Look at gene expression of signaling pathways 
+## Wnt
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+
+Idents(FIBROS) <- "agf"
+VlnPlot(FIBROS, features = c("WNT5A", "SFRP1", "MYC", "ROR2", "PRICKLE1", 
+                             "FZD7", "PLCB4", "LRP6"), pt.size = 0)
+
+VlnPlot(FIBROS, features = c("WNT5A"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("SFRP1"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("MYC"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("ROR2"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("PRICKLE1"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("FZD7"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("PLCB4"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("LRP6"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+
+Idents(FIBROS) <- "DiseaseState"
+FIBROS <- subset(FIBROS, idents = c("Treatment Naive Tumor", "Treated Tumor"))
+VlnPlot(FIBROS, features = c("WNT5A", "SFRP1", "MYC",
+                             "PRICKLE1", 
+                             "FZD7", "PLCB4", "LRP6"), pt.size = 0)
+VlnPlot(FIBROS, features = c("WNT5A"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("SFRP1"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("MYC"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("PRICKLE1"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("FZD7"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("PLCB4"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+VlnPlot(FIBROS, features = c("LRP6"), pt.size = 0)+ stat_compare_means(method = "wilcox.test")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

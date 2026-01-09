@@ -1,0 +1,105 @@
+---
+title: "13. Pseudobulk Analysis - All Cells"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2025-12-09"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load object and libraries
+
+```{r, warning=FALSE, message=FALSE}
+suppressPackageStartupMessages({
+ library(Seurat)
+  library(EnhancedVolcano)
+  library(enrichplot)
+  library(cowplot)
+  library(DESeq2)
+  library(ggalt)
+  library(devtools)
+  library(ashr)
+  library(tidytree)
+})
+#Load in all required objects. Here we load in our endothelial cells, fibroblasts, epithelial, tcells and myeloid broken down.
+#We also load in the full longitudinal dataset to look for global changes. 
+  
+source("../UTILS/pseudobulk_functions.R")
+Fibro <- readRDS("../OBJECTS/final_fibroblasts_for_part2.RDS")
+epi <- readRDS("../OBJECTS/epi_with_scores.rds")
+t_cells <- readRDS("../OBJECTS/tcell.RDS")
+myleoid <- readRDS("../OBJECTS/eileen_annotated_longitudinal_myeloid.rds")
+longitudinal <- readRDS("../OBJECTS/eileen_annotated_longitudinal.rds")
+```
+
+# Pseudobulk for each subtype
+```{r, warning=FALSE, message=FALSE}
+##################################################################
+##                Pseudobulk for each population                ##
+##################################################################
+fibro_DGE <- pseudobulk_dge(seurat_object = Fibro, assay = "CorrectedCounts",
+                            aggregate_by = "sample_id", comparison = "time_point")
+epi_DGE <- pseudobulk_dge(seurat_object = epi, assay = "CorrectedCounts",
+                            aggregate_by = "sample_id", comparison = "time_point")
+tcell_DGE <- pseudobulk_dge(seurat_object = t_cells, assay = "CorrectedCounts",
+                            aggregate_by = "sample_id", comparison = "time_point")
+myleoid_DGE <- pseudobulk_dge(seurat_object = myleoid, assay = "CorrectedCounts",
+                            aggregate_by = "sample_id", comparison = "time_point")
+long_DGE <- pseudobulk_dge(seurat_object = longitudinal, assay = "CorrectedCounts",
+                            aggregate_by = "sample_id", comparison = "time_point")
+
+
+```
+
+# Plot PCA
+```{r, warning=FALSE, message=FALSE}
+#################################################################
+##                          PCA Plots                          ##
+#################################################################
+
+fibro_pca <- pca_plot(fibro_DGE, groups = "time_point") + ggtitle("Fibroblast Population")
+epi_pca <- pca_plot(epi_DGE, groups = "time_point") + ggtitle("Epithelial Population")
+tcell_pca <- pca_plot(tcell_DGE, groups = "time_point") + ggtitle("tcell Population")
+myeloid_pca <- pca_plot(myleoid_DGE, groups = "time_point") + ggtitle("myleoid Population")
+long_pca <- pca_plot(long_DGE, groups = "time_point") + ggtitle("Entire Population")
+```
+
+```{r, warning=FALSE, message=FALSE}
+fibro_pca
+epi_pca
+tcell_pca
+myeloid_pca
+long_pca
+```

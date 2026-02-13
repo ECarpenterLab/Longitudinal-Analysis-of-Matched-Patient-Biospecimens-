@@ -10,22 +10,27 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
 
 ### Repository Structure
 
-- **`Data/`**  
+- **`DATA/`**  
   Contains low-size input data, spatial transcriptomics annotations, and the `samples_info` spreadsheet for scRNA-seq analysis.  
   Large data files must be downloaded as described in `Data_Acquisition` prior to running scripts.
 
-- **`Markdown/`**  
+- **`MARKDOWN/`**  
   Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
 
-- **`Objects/`**  
+- **`OBJECTS/`**  
   Contains processed and annotated Seurat objects generated from:
-  - [`Scripts/00_ambient_RNA_correction.Rmd`](Scripts/00_ambient_RNA_correction.Rmd)
-  - [`Scripts/01_Generating_Merged_annotation.Rmd`](Scripts/01_Generating_Merged_annotation.Rmd)
+  - [`MARKDOWN/00_ambient_RNA_correction.Rmd`](MARKDOWN/00_ambient_RNA_correction.Rmd)
+  - [`MARKDOWN/01_Generating_Merged_annotation.Rmd`](MARKDOWN/01_Generating_Merged_annotation.Rmd)
 
-  Newly generated objects from script `#00` should be saved here.
+  Newly generated objects from MARKDOWN `#00` should be saved here.
 
 - **`Utils/`**  
   Contains utility functions used across scripts for modular and reproducible analysis.
+
+- **`DOCUMENTS/`**  
+  Contains the rendered markdown files as .html files. 
+  - [`MARKDOWN/00_ambient_RNA_correction.Rmd`](MARKDOWN/00_ambient_RNA_correction.Rmd)
+  - [`MARKDOWN/01_Generating_Merged_annotation.Rmd`](MARKDOWN/01_Generating_Merged_annotation.Rmd)
 
 ---
 
@@ -39,7 +44,7 @@ Ambient RNA contamination was corrected using
 [SoupX](https://github.com/constantAmateur/SoupX)  
 as implemented in:
 
-- [`Scripts/05_ambient_RNA_correction.R`](Scripts/05_ambient_RNA_correction.R)
+- [`MARKDOWN/00_ambient_RNA_correction.Rmd`](MARKDOWN/00_ambient_RNA_correction.Rmd)
 
 ---
 
@@ -47,7 +52,7 @@ as implemented in:
 
 Longitudinal clusters were labeled and subset using previously published markers:
 
-- [`Scripts/01_Generating_Merged_annotation.R`](Scripts/01_Generating_Merged_annotation.R)
+- [`MARKDOWN/01_Generating_Merged_annotation.R`](MARKDOWN/01_Generating_Merged_annotation.R)
 
 ---
 
@@ -56,7 +61,7 @@ Longitudinal clusters were labeled and subset using previously published markers
 Published and internally derived gene signatures were mapped onto extracted cancer-associated fibroblasts using  
 [AUCell](https://github.com/aertslab/AUCell), as implemented in:
 
-- [`Scripts/07_Fibroblast_Cell_Characterization.Rmd`](Scripts/07_Fibroblast_Cell_Characterization.Rmd)
+- [`MARKDOWN/07_Fibroblast_Cell_Characterization.Rmd`](MARKDOWN/07_Fibroblast_Cell_Characterization.Rmd)
 
 ---
 
@@ -64,7 +69,7 @@ Published and internally derived gene signatures were mapped onto extracted canc
 
 Inferred copy number variation (CNV) analysis of epithelial populations was performed using:
 
-- [`Scripts/02_Numbat.R`](Scripts/02_Numbat.R)
+- [`MARKDOWN/02_Numbat.R`](MARKDOWN/02_Numbat.R)
 
 Ductal cells from healthy donor pancreata were used as the reference population.
 
@@ -75,10 +80,10 @@ Ductal cells from healthy donor pancreata were used as the reference population.
 Each major cell type was analyzed independently:
 
 - **T cells**:  
-  [`Scripts/05_T_Cell_Characterization.Rmd`](Scripts/05_T_Cell_Characterization.Rmd)
+  [`MARKDOWN/05_T_Cell_Characterization.Rmd`](MARKDOWN/05_T_Cell_Characterization.Rmd)
 
 - **Myeloid cells**:  
-  [`Scripts/06_Myeloid_Cell_Characterization.Rmd`](Scripts/06_Myeloid_Cell_Characterization.Rmd)
+  [`MARKDOWN/06_Myeloid_Cell_Characterization.Rmd`](MARKDOWN/06_Myeloid_Cell_Characterization.Rmd)
 
 ---
 
@@ -86,7 +91,7 @@ Each major cell type was analyzed independently:
 
 Ligand–receptor inference on the longitudinal object was performed using CellChat:
 
-- [`Scripts/09_CellChat_Overall_Longitudinal.Rmd`](Scripts/09_CellChat_Overall_Longitudinal.Rmd)
+- [`MARKDOWN/09_CellChat_Overall_Longitudinal.Rmd`](MARKDOWN/09_CellChat_Overall_Longitudinal.Rmd)
 
 ---
 
@@ -97,11 +102,11 @@ Samples were merged with previously published healthy and tumor pancreas scRNA-s
 Integration was performed using the recommended  
 [Seurat rPCA MNN integration workflow](https://satijalab.org/seurat/articles/integration_rpca.html), implemented in:
 
-- [`Scripts/10_merging_external_CAF_datasets_and_integrating.Rmd`](Scripts/10_merging_external_CAF_datasets_and_integrating.Rmd)
+- [`MARKDOWN/10_merging_external_CAF_datasets_and_integrating.Rmd`](MARKDOWN/10_merging_external_CAF_datasets_and_integrating.Rmd)
 
 Prior to full integration, cancer-associated fibroblasts (CAFs) from both datasets were queried in:
 
-- [`Scripts/08_Merging_Gift_of_Life_fibroblasts.Rmd`](Scripts/08_Merging_Gift_of_Life_fibroblasts.Rmd)
+- [`MARKDOWN/08_Merging_Gift_of_Life_fibroblasts.Rmd`](MARKDOWN/08_Merging_Gift_of_Life_fibroblasts.Rmd)
 
 ---
 
@@ -109,11 +114,11 @@ Prior to full integration, cancer-associated fibroblasts (CAFs) from both datase
 
 Patient 1475 recurrence timepoint analysis:
 
-- [`Scripts/03_Merging_PT1475_Recurrence_Timepoint.Rmd`](Scripts/03_Merging_PT1475_Recurrence_Timepoint.Rmd)
+- [`MARKDOWN/03_Merging_PT1475_Recurrence_Timepoint.Rmd`](MARKDOWN/03_Merging_PT1475_Recurrence_Timepoint.Rmd)
 
 Epithelial cell characterization for Patient 1475:
 
-- [`Scripts/04_PT1475_Epithelial_Cell_Characterization.Rmd`](Scripts/04_PT1475_Epithelial_Cell_Characterization.Rmd)
+- [`MARKDOWN/04_PT1475_Epithelial_Cell_Characterization.Rmd`](MARKDOWN/04_PT1475_Epithelial_Cell_Characterization.Rmd)
 
 ---
 
@@ -130,6 +135,3 @@ For full reproducibility, scripts should be run in the following general order:
 7. Cell–cell communication analysis  
 
 ---
-
-This structure ensures deterministic reproduction of all analyses described in the manuscript.
-

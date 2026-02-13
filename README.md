@@ -1,2 +1,135 @@
-# Longitudinal-Analysis-of-Matched-Patient-Biospecimens-
-Repository containing all code and objects required to perform analysis as seen in publication titled "Longitudinal spatial analysis of matched patient biospecimens reveals neural reprogramming of cancer-associated fibroblasts following chemotherapy in pancreatic ductal adenocarcinoma"
+# Repository Overview
+
+This repository contains code used for single-cell RNA sequencing analysis performed in the paper:
+
+[Longitudinal analysis of matched patient biospecimens reveals Neural Reprogramming of Cancer-Associated Fibroblasts Following Chemotherapy in Pancreatic Cancer](https://www.biorxiv.org/content/10.64898/2025.12.01.691614v1.full)
+
+---
+
+## How to Reproduce the Analysis
+
+### Repository Structure
+
+- **`Data/`**  
+  Contains low-size input data, spatial transcriptomics annotations, and the `samples_info` spreadsheet for scRNA-seq analysis.  
+  Large data files must be downloaded as described in `Data_Acquisition` prior to running scripts.
+
+- **`Markdown/`**  
+  Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
+
+- **`Objects/`**  
+  Contains processed and annotated Seurat objects generated from:
+  - [`Scripts/00_ambient_RNA_correction.Rmd`](Scripts/00_ambient_RNA_correction.Rmd)
+  - [`Scripts/01_Generating_Merged_annotation.Rmd`](Scripts/01_Generating_Merged_annotation.Rmd)
+
+  Newly generated objects from script `#00` should be saved here.
+
+- **`Utils/`**  
+  Contains utility functions used across scripts for modular and reproducible analysis.
+
+---
+
+## Single-Cell RNA Sequencing Analysis
+
+### Alignment and Preprocessing
+
+FASTQ files were aligned to the hg38 reference genome using **CellRanger v7.1.0**.
+
+Ambient RNA contamination was corrected using  
+[SoupX](https://github.com/constantAmateur/SoupX)  
+as implemented in:
+
+- [`Scripts/05_ambient_RNA_correction.R`](Scripts/05_ambient_RNA_correction.R)
+
+---
+
+### Cluster Annotation
+
+Longitudinal clusters were labeled and subset using previously published markers:
+
+- [`Scripts/01_Generating_Merged_annotation.R`](Scripts/01_Generating_Merged_annotation.R)
+
+---
+
+### Fibroblast Characterization
+
+Published and internally derived gene signatures were mapped onto extracted cancer-associated fibroblasts using  
+[AUCell](https://github.com/aertslab/AUCell), as implemented in:
+
+- [`Scripts/07_Fibroblast_Cell_Characterization.Rmd`](Scripts/07_Fibroblast_Cell_Characterization.Rmd)
+
+---
+
+### Copy Number Variation Analysis
+
+Inferred copy number variation (CNV) analysis of epithelial populations was performed using:
+
+- [`Scripts/02_Numbat.R`](Scripts/02_Numbat.R)
+
+Ductal cells from healthy donor pancreata were used as the reference population.
+
+---
+
+### Cell-Type Specific Analyses
+
+Each major cell type was analyzed independently:
+
+- **T cells**:  
+  [`Scripts/05_T_Cell_Characterization.Rmd`](Scripts/05_T_Cell_Characterization.Rmd)
+
+- **Myeloid cells**:  
+  [`Scripts/06_Myeloid_Cell_Characterization.Rmd`](Scripts/06_Myeloid_Cell_Characterization.Rmd)
+
+---
+
+### Cell–Cell Communication Analysis
+
+Ligand–receptor inference on the longitudinal object was performed using CellChat:
+
+- [`Scripts/09_CellChat_Overall_Longitudinal.Rmd`](Scripts/09_CellChat_Overall_Longitudinal.Rmd)
+
+---
+
+### Integration with External Datasets
+
+Samples were merged with previously published healthy and tumor pancreas scRNA-seq datasets (PMID: 37021392).
+
+Integration was performed using the recommended  
+[Seurat rPCA MNN integration workflow](https://satijalab.org/seurat/articles/integration_rpca.html), implemented in:
+
+- [`Scripts/10_merging_external_CAF_datasets_and_integrating.Rmd`](Scripts/10_merging_external_CAF_datasets_and_integrating.Rmd)
+
+Prior to full integration, cancer-associated fibroblasts (CAFs) from both datasets were queried in:
+
+- [`Scripts/08_Merging_Gift_of_Life_fibroblasts.Rmd`](Scripts/08_Merging_Gift_of_Life_fibroblasts.Rmd)
+
+---
+
+### Patient-Specific Analyses
+
+Patient 1475 recurrence timepoint analysis:
+
+- [`Scripts/03_Merging_PT1475_Recurrence_Timepoint.Rmd`](Scripts/03_Merging_PT1475_Recurrence_Timepoint.Rmd)
+
+Epithelial cell characterization for Patient 1475:
+
+- [`Scripts/04_PT1475_Epithelial_Cell_Characterization.Rmd`](Scripts/04_PT1475_Epithelial_Cell_Characterization.Rmd)
+
+---
+
+## Execution Order (Recommended)
+
+For full reproducibility, scripts should be run in the following general order:
+
+1. Alignment and preprocessing  
+2. Object generation and annotation  
+3. CNV analysis  
+4. Cell-type–specific characterization  
+5. CAF signature mapping  
+6. Dataset integration  
+7. Cell–cell communication analysis  
+
+---
+
+This structure ensures deterministic reproduction of all analyses described in the manuscript.
+

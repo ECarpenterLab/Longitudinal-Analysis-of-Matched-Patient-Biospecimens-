@@ -1,0 +1,462 @@
+---
+title: "07_Fibroblast_Cell_Characterization"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-02-11"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+```{r, message=FALSE, warning=FALSE}
+##fibroblast signatures
+
+##Aylin henstridge 3/13/2024
+library(Seurat)
+library(SeuratObject)
+library(SeuratWrappers)
+library(AUCell)
+library(monocle3)
+library(GSVA)
+library(pheatmap)
+library(tidyverse)
+library(RColorBrewer)
+library(DT)
+library(readxl)
+library(EnhancedVolcano)
+library(enrichplot)
+library(cowplot)
+library(DESeq2)
+library(ggalt)
+library(devtools)
+library(ashr)
+library(tidytree)
+library(dplyr)
+library(fgsea)
+library(msigdbr)
+library(ggpubr)
+`%nin%` <- Negate(`%in%`)
+getPalette <- colorRampPalette(brewer.pal(9, 'Set1'))
+source("../UTILS/pseudobulk_functions.R")
+source("../UTILS/patient_split.R")
+source("../UTILS/GSEA.R")
+#read in subsested object. this object contains the fibroblasts/fibro only epithelial cells for the dataset. 
+
+#FibroEndo subset
+FibroEndo<- readRDS("../OBJECTS/Fibro_subset.rds")
+DimPlot(object =FibroEndo, reduction = "umap", pt.size = 0.1, label = F, repel = T, cols = getPalette(length(levels(FibroEndo))), split.by= "timepoint")
+```
+
+# Clean up object
+```{r, message=FALSE, warning=FALSE}
+DefaultAssay(FibroEndo) <- "integrated"
+# dimension reduction and clustering of integrated object
+FibroEndo <- RunPCA(FibroEndo, verbose = FALSE)
+ElbowPlot(FibroEndo, 50)
+FibroEndo <- RunUMAP(FibroEndo, reduction = "pca", dims = 1:30, verbose = FALSE)
+FibroEndo <- FindNeighbors(FibroEndo, reduction = "pca", dims = 1:30)
+FibroEndo <- FindClusters(FibroEndo, resolution = 1.0)
+FibroEndo[["FibroEndo_seurat_clusters"]] <- Idents(object = FibroEndo)
+```
+
+```{r, message=FALSE, warning=FALSE}
+DimPlot(object =FibroEndo, reduction = "umap", pt.size = 0.1, label = T, repel = T, cols = getPalette(length(levels(FibroEndo))))
+```
+
+```{r, message=FALSE, warning=FALSE}
+DefaultAssay(FibroEndo) <- "SCT"
+
+FibroEndo <- PrepSCTFindMarkers(FibroEndo, assay = "SCT", verbose = TRUE)
+markers <- FindAllMarkers(FibroEndo, assay = 'SCT', min.pct = 0.25, only.pos = T)
+
+#Name the clusters level 1
+Idents(object = FibroEndo) <- 'FibroEndo_seurat_clusters'
+levels(FibroEndo)
+current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14, 15)
+DimPlot(FibroEndo, label = T)
+new.cluster.ids <- c('Fibro2', 'Endothelial', 'Fibro2', 'Fibro2', 'Fibro1', 'Fibro2', 
+                     'Fibro3', 'Fibro1', 'Fibro3', 'Fibro1', 'Endothelial',
+                     'Fibro3', 'Fibro2', 'Endothelial', 'Junk', 'Fibro1')
+names(x = new.cluster.ids) <- levels(x = FibroEndo)
+FibroEndo<- RenameIdents(object = FibroEndo, new.cluster.ids)
+
+FibroEndo[["Level1Labels_FibroEndo"]] <- Idents(object = FibroEndo)
+FibroEndo_fil <- subset(FibroEndo, idents = c('Junk'), invert = TRUE)
+Idents(object=FibroEndo_fil) <- 'Level1Labels_FibroEndo'
+Idents(FibroEndo_fil) <- factor(Idents(FibroEndo_fil), levels = rev(c('Fibro1', 'Fibro2', 'Fibro3', 'Endothelial')))
+levels(FibroEndo_fil)
+DefaultAssay(FibroEndo_fil) <- "SCT"
+```
+
+# Label top expressed genes in DotPlot
+
+```{r, message=FALSE, warning=FALSE}
+DotPlot(object = FibroEndo_fil, features = c("SLIT2", 'NEGR1', 'RORA', 'EGFR', 'COL1A1', 'COL1A2', 'SPARC', "DPT", 
+                                             'LGALS2', 'ACTA2', 'NOTCH3', 'TAGLN', 'RGS5', 'PLVAP', 'VWF', 
+                                             'PECAM1'), cols = c("white", "magenta4")) +theme(legend.position = "right", 
+                                                                                              axis.text.x = element_text(angle = 45, size = 10,  hjust = 1))
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Have contaminating pericytes present in Fibro3 - these need to be removed
+DimPlot(object =FibroEndo_fil, reduction = "umap", pt.size = 0.1, label = F, repel = T, split.by= "timepoint")
+```
+```{r, eval=FALSE}
+saveRDS(FibroEndo_fil, "Annotated_FibroEndoPeri_AH.rds")
+```
+
+```{r, message=FALSE, warning=FALSE}
+#######################Now filter out endothelial cells and characterize fibroblasts specifically#####################################
+
+Idents(object = FibroEndo_fil) <- "Level1Labels_FibroEndo"
+
+#make an interactive data table to search for genes present in clusters. 
+markers <- FindAllMarkers(FibroEndo_fil, assay = "CorrectedCounts", min.pct = 0.25, only.pos = T) 
+datatable((markers), filter = 'top', caption = "Seurat Cluster Markers", options = list(scrollX = T))
+```
+
+```{r, message=FALSE, warning=FALSE}
+#change identity to what you want cluster sorted by in UMAP (i.e cluster names here)
+DimPlot(FibroEndo_fil, reduction = "umap", label = TRUE, pt.size = 0.03)
+```
+
+```{r, message=FALSE, warning=FALSE}
+Idents(FibroEndo_fil) <- "Level1Labels_FibroEndo"
+FeaturePlot(FibroEndo_fil, features = c("RGS5"))
+
+fibro <- subset(FibroEndo_fil, idents = c("Fibro1", "Fibro2")) #Fibro3 is actually pericytes, so remove them
+```
+
+# Re-Cluster Clean Object
+
+```{r, message=FALSE, warning=FALSE}
+######################################Now recluster just fibroblasts###################################################
+DefaultAssay(fibro) <- "integrated"
+fibro <- FindVariableFeatures(fibro, selection.method = "vst", nfeatures = 2000, assay = "CorrectedCounts")
+fibro <- ScaleData(fibro, features = rownames(fibro),verbose = FALSE)
+fibro <- RunPCA(fibro, verbose = FALSE)
+ElbowPlot(fibro, 50)
+PCNUM = 15
+fibro <- RunUMAP(fibro, reduction = "pca", dims = 1:PCNUM)
+fibro <- FindNeighbors(fibro, reduction = "pca", dims = 1:PCNUM)
+fibro <- FindClusters(fibro, resolution = 0.17)
+levels(fibro)
+current.cluster.ids <- c('0', '1', '2')
+new.cluster.ids <- c('Fibro1', 'Fibro2', 'Fibro3')
+names(x = new.cluster.ids) <- levels(x = fibro)
+fibro<- RenameIdents(object = fibro, new.cluster.ids)
+fibro[["Level1Labels_Fibro_only"]] <- Idents(object = fibro)
+```
+
+```{r, message=FALSE, warning=FALSE}
+DimPlot(object = fibro, reduction = "umap", label = FALSE
+        , pt.size = 0.5, cols = c("salmon", "chartreuse4", "cornflowerblue"))
+```
+
+# Cell_frequency plot
+
+```{r, message=FALSE, warning=FALSE}
+#check gene expression in fibro 1,2,3
+DefaultAssay(fibro) <- "CorrectedCounts"
+fibro <- NormalizeData(fibro)
+fibro <- ScaleData(fibro, features = rownames(fibro),verbose = FALSE)
+VlnPlot(fibro,features = c("FAP", "PDGFRA", "PDGFRB"), pt.size = 0)
+VlnPlot(fibro, features = c("ACTA2", "TAGLN", "POSTN"), pt.size = 0)
+VlnPlot(fibro, features = c("PDPN", "DPT", "MFAP4"), pt.size = 0)
+VlnPlot(fibro, features = c("CD34", "RSPO3", "CDH11"), pt.size = 0)
+```
+
+```{r, message=FALSE, warning=FALSE}
+fibro$Level1Labels_Fibro_only
+samples.list <- unique(fibro$sample_id)
+clusters <- lapply(samples.list, function(x){
+  subset <- subset(fibro, subset = sample_id == x)
+  dist <- data.frame(table(subset$Level1Labels_Fibro_only))
+  
+  return(dist)
+})
+
+names(clusters) <- samples.list
+
+#calculate relative freq (fractions) of each cell type
+clusters_percent <- lapply(clusters, FUN = function(x){
+  summ <- sum(x$Freq)
+  x$Freq <- (x$Freq/summ)
+  return(x)
+})
+
+#making things ggplot-friendly!
+clusters_dist <- reshape2::melt(clusters, id.var = "Var1")
+colnames(clusters_dist) <- c("Level1Labels_Fibro_only","variable","value","sample_id")   
+clusters_percent_dist <- reshape2::melt(clusters_percent, id.var = "Var1")
+colnames(clusters_percent_dist) <- c("Level1Labels_Fibro_only","variable","value","sample_id")
+
+ggplot(clusters_percent_dist, aes(fill=Level1Labels_Fibro_only, y = value, x = sample_id)) + 
+  geom_bar(position = "stack", stat = "identity") + 
+  theme_bw() +
+  theme(legend.position = "right",
+        axis.text.x = element_text(angle = 45, size = 8, face = "bold", hjust = 1)) +
+  ylab("count") + xlab("patient_id") + ggtitle("Relative Cell Types Abundance") +
+  scale_fill_manual(values = c('salmon', 'chartreuse4', 'cornflowerblue'))
+```
+
+```{r, message=FALSE, warning=FALSE}
+genes <- c("PDGFRA", "NEGR1", "SLIT2", "ROBO1", 
+           "SEMA3A", "NRP1", "NFIA",
+           "EPHA3", "FAP",
+           "ACTA2", "TAGLN", "THY1",
+           "COL1A1", "COL1A2",
+           "VIM", "PDPN",
+           "POSTN", "CXCL12", "DPT")
+```
+
+```{r, message=FALSE, warning=FALSE}
+DotPlot(object = fibro, features = genes, cols = c("white","magenta4"), scale = FALSE) + theme(legend.position= "right", axis.text.x = element_text(angle=45, size=10, hjust=1))
+DotPlot(
+  object = fibro,
+  features = genes,
+  scale = TRUE
+) +
+  scale_color_gradientn(
+    colours = rev(brewer.pal(11, "RdYlBu"))
+  ) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, size = 10, hjust = 1)
+  )
+```
+
+# Differentially Expressed Genes
+```{r, message=FALSE, warning=FALSE}
+DefaultAssay(fibro) <- "CorrectedCounts"
+fibro.markers <- FindAllMarkers(fibro, only.pos = TRUE, min.pct = 0.25,logfc.threshold = 0.25) #always use 0.25 for percent and fold change threshold
+fibro.markers %>% group_by(cluster) %>% top_n(n=2, wt=avg_log2FC) #ranks biggest to smallest
+```                 
+
+# AUCELL ANALYSIS ON FIBROBLASTS USING KNOWN GENE SIGNATURES
+```{r, message=FALSE, warning=FALSE}
+library(readxl)
+mycaf_icaf <- read_excel("../GENE_SIGNATURES/MYCAF_ICAF.xlsx")
+mycaf <- mycaf_icaf$mycaf
+icaf <- mycaf_icaf$icaf
+apcaf <- mycaf_icaf$apcaf
+
+
+mycaf_icaf <- list(
+  mycaf = mycaf,
+  icaf = icaf,
+  apcaf = apcaf
+)
+expr <- GetAssayData(fibro,
+                     assay = "CorrectedCounts",
+                     layer = "counts")
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+
+auc_score_2 <- AUCell_calcAUC(rankings = geneRanking, geneSets = mycaf_icaf, aucMaxRank = nrow(geneRanking)*0.1)
+
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score_2 <- as.data.frame(t(assay(c(auc_score_2))))
+auc_score_scaled_2 <- as.data.frame(scale(auc_score_2))
+#scaled the data and add it as metadata
+fibro <- AddMetaData(fibro, metadata = auc_score_scaled_2)
+```
+
+## Create the plot object and display it in the console
+```{r, message=FALSE, warning=FALSE}
+FeaturePlot(fibro, features = c("mycaf"), label = FALSE, repel = TRUE, order = TRUE) & 
+  scale_colour_gradientn(scale = TRUE, colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+FeaturePlot(fibro, features = c("icaf"), label = FALSE, repel = TRUE, order = TRUE) & 
+  scale_colour_gradientn(scale = TRUE, colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+FeaturePlot(fibro, features = c("apcaf"), label = FALSE, repel = TRUE, order = TRUE) & 
+  scale_colour_gradientn(scale = TRUE, colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+```
+
+## Feature plot of top expressed genes
+```{r, message=FALSE, warning=FALSE}
+
+###___________________________________________________
+FeaturePlot(fibro, features = c("NEGR1"), pt.size = 1)& scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+FeaturePlot(fibro, features = c("NFIA"), pt.size = 1) & scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+FeaturePlot(fibro, features = c("ROBO1"), pt.size = 1) & scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+FeaturePlot(fibro, features = c("NRP1"), pt.size = 1)& scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+FeaturePlot(fibro, features = c("SLIT2"), pt.size = 1) & scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+FeaturePlot(fibro, features = c("ACTA2"), pt.size = 1) & scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+FeaturePlot(fibro, features = c("CXCL12"), pt.size = 1)& scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+FeaturePlot(fibro, features = c("EPHA3"), pt.size = 1) & scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+```
+
+
+## Make cleaner timepoint metadata
+```{r, message=FALSE, warning=FALSE}
+fibro$time_point <- NA
+Idents(fibro) <- "time_point"
+levels(fibro)
+fibro$time_point[fibro$sample_id == "1402_T1"] <- 1
+fibro$time_point[fibro$sample_id == "1402_T2"] <- 2
+fibro$time_point[fibro$sample_id == "1475_T1"] <- 1
+fibro$time_point[fibro$sample_id == "1475_T2"] <- 2
+fibro$time_point[fibro$sample_id == "1529_T1"] <- 1
+fibro$time_point[fibro$sample_id == "1529_T2"] <- 2
+fibro$time_point[fibro$sample_id == "1550_T1"] <- 1
+fibro$time_point[fibro$sample_id == "1550_T2"] <- 2
+fibro$time_point[fibro$sample_id == "1471_T1"] <- 1
+fibro$time_point[fibro$sample_id == "1471_T2"] <- 2
+
+Idents(fibro) <- "time_point"
+fibro$time_point <- factor(
+  fibro$time_point,
+  levels = c(1, 2)
+)
+
+Idents(fibro) <- "time_point"
+levels(fibro)
+```
+
+# Look at differential expressed genes
+```{r, message=FALSE, warning=FALSE}
+Idents(fibro) <- "patient_id"
+levels(fibro)
+Idents(fibro) <- factor(Idents(fibro), levels = rev(c('1402', '1471', '1475', '1529', '1550')))
+VlnPlot(fibro, features = c("NEGR1"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("NRP1"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("NFIA"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("EPHA3"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("SLIT2"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("ACTA2"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("DPT"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("LRRC15"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("FAP"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+VlnPlot(fibro, features = c("CXCL12"), split.by = "time_point", split.plot = TRUE, pt.size = 0)
+```
+
+# Defining Neural CAF signature
+```{r, message=FALSE, warning=FALSE}
+Idents(fibro) <- 'Level1Labels_Fibro_only'
+DimPlot(fibro)
+```
+
+## DE code:(using corrected counts assay) 
+```{r, message=FALSE, warning=FALSE}
+DefaultAssay(object = fibro) <- "CorrectedCounts" #make sure you always use corrected counts when finding markers
+Fibro_scaled <- ScaleData(fibro, features = rownames(fibro))
+Idents(object = Fibro_scaled) <- 'time_point'
+levels(Fibro_scaled)
+```
+
+## Neural Gene Signature
+```{r, message=FALSE, warning=FALSE}
+agf_signature <- c("NEGR1", "SLIT2", "ROBO1", "EPHA3","NRP1", "NFIA")
+AGF <- list(
+  
+  agf_signature = agf_signature
+)
+expr <- GetAssayData(fibro,
+                     assay = "CorrectedCounts",
+                     layer = "counts")
+
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+auc_score <- AUCell_calcAUC(rankings = geneRanking, geneSets = AGF, aucMaxRank = nrow(geneRanking)*0.1)
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score <- as.data.frame(t(assay(c(auc_score))))
+auc_score_scaled <- as.data.frame(scale(auc_score))
+
+#scaled the data and add it as metadata
+fibro <- AddMetaData(fibro, metadata = auc_score_scaled)
+```
+
+```{r, message=FALSE, warning=FALSE}
+FeaturePlot(fibro, features = c("agf_signature"), pt.size =1, label = FALSE, repel = TRUE) & 
+  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+# 1. Define what "top expressors" means (e.g., top 10% of cells)
+agf_threshold <- quantile(fibro$agf_signature, 0.75)  # top 25%
+# 2. Create a new metadata column
+fibro$agf <- ifelse(fibro$agf_signature >= agf_threshold, "agf", "caf")
+# Check distribution
+table(fibro$agf)
+```
+
+# Differential Expression and Pathway Analysis
+```{r, message=FALSE, warning=FALSE}
+Idents(fibro) <- "agf"
+levels(fibro)
+
+agf.markers <- FindMarkers(fibro, ident.1 = "agf", ident.2 = "caf", assay = "CorrectedCounts", test.use = "MAST", verbose = FALSE, recorrect_umi = FALSE, logfc.threshold = 0)
+```
+
+## Published Gene Sig. and Neural Sig.
+
+```{r, message=FALSE, warning=FALSE}
+tissue_cell_data <- FetchData(fibro, vars = c('agf_signature','icaf','mycaf', 'sample_id'))
+n <- 1 # number of metadata columns
+patient_avg <- data.frame()
+for (id in levels(factor(tissue_cell_data$sample_id))) {
+  data_subset <- tissue_cell_data %>% filter(sample_id == id)
+  data_subset_avg <- apply(data_subset[,1:(ncol(data_subset)-n)], 2, mean)
+  patient_avg <- rbind(patient_avg, data_subset_avg)
+}
+colnames(patient_avg) <- colnames(tissue_cell_data)[1:(ncol(tissue_cell_data)-n)]
+rownames(patient_avg) <- levels(factor(tissue_cell_data$sample_id))
+cycling <- pheatmap(patient_avg, 
+                    color = colorRampPalette(c("blue", "white", "red"))(256),
+                    scale = "column",# Color palette,
+                    main = "Heatmap of Fibroblast Gene Sig.(scale by column)",   # Title of the heatmap
+                    clustering_distance_rows = "euclidean",   # Distance metric for row clustering
+                    clustering_distance_cols = "euclidean",   # Distance metric for column clustering
+                    cellwidth = 10,
+                    cellheight = 10,
+                    fontsize = 8,           # Font size of row and column labels
+                    legend = TRUE,           # Show legend
+                    cluster_rows = FALSE,   # Do not cluster rows
+                    cluster_cols = FALSE,    # Do not cluster columns
+                    width = 100,   # Adjust the width of the plot
+                    height = 100,   # Adjust the height of the plot
+                    xlab = "signatures",  # X-axis label
+                    ylab = "Patient_Timepoint"   # Y-axis labelhttp://127.0.0.1:22419/graphics/9f4d525b-e106-4a69-8ae6-695b611e88a4.png
+)
+```
+
+## Published CAF Genes
+```{r, message=FALSE, warning=FALSE}
+DefaultAssay(fibro) <- "CorrectedCounts"
+Idents(fibro) <- "patient_id"
+VlnPlot(fibro, features = c("LRRC15", "DPT", "PDGFRB", "PDGFRA",
+                            "TAGLN", "FAP", "PDPN"), pt.size = 0, split.by = "time_point", split.plot = TRUE)
+VlnPlot(fibro, features = c("LEF1", "FABP4"), pt.size = 0, split.by = "time_point", split.plot = TRUE)
+```
+

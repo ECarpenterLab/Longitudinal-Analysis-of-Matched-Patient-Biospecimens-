@@ -1,0 +1,147 @@
+---
+title: "09_Cell_Chat_Longitudinal"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-02-11"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+```{r, message=FALSE, warning=FALSE}
+# loading libraries -------------------------------------------------------
+  library(Seurat)
+  library(CellChat)
+  library(tidyverse)
+  library(magrittr)
+  library(patchwork)
+
+
+# loading data ------------------------------------------------------------
+
+CellChatDB <- CellChatDB.human
+longitudinal <- readRDS("../OBJECTS/Annotated_Longitudinal_Object_AH.rds")
+```
+
+# Organizing Metadata and Making Objects
+
+## Creating treatment Naive and treated subsets --------------------------------------
+```{r, message=FALSE, warning=FALSE}
+Idents(longitudinal) <- "Level1Labels"
+levels(longitudinal)
+DimPlot(longitudinal)
+longitudinal$samples <- longitudinal$sample_id
+
+integratedData.list <- SplitObject(longitudinal, split.by = "timepoint")
+remove(longitudinal)
+
+ # Creating CellChat Object ------------------------------------------------
+
+assayUsed <- 'CorrectedCounts'
+CellChat.list <- lapply(integratedData.list, function(x){
+  CellChat_obj <- createCellChat(object = GetAssayData(x, assay = assayUsed, layer = "data"),
+                                 meta = x@meta.data,
+                                 group.by = "Level1Labels")
+})
+remove(integratedData.list)
+```
+
+# Running CellChat 
+```{r, message=FALSE, warning=FALSE}
+CellChat.list <- lapply(CellChat.list, function(x){
+  x@DB <- CellChatDB
+  cellchat <- subsetData(x)
+  cellchat <- identifyOverExpressedGenes(cellchat)
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  cellchat@meta$Level1Labels <- factor(cellchat@meta$Level1Labels)
+  cellchat@meta$Level1Labels <- droplevels(cellchat@meta$Level1Labels,
+                                            exclude = setdiff(levels(cellchat@meta$Level1Labels),unique(as.character(cellchat@meta$Level1Labels))))
+  cellchat@idents <- cellchat@meta$Level1Labels
+  cellchat <- computeCommunProb(cellchat)
+  cellchat <- filterCommunication(cellchat, min.cells = 10)
+  cellchat <- computeCommunProbPathway(cellchat)
+  cellchat <- aggregateNet(cellchat)
+  return(cellchat)
+})
+```
+
+# Plotting CellChat
+## Splitting objects
+```{r, message=FALSE, warning=FALSE}
+T1 <- CellChat.list[[2]] #timepoint 1
+T2 <- CellChat.list[[1]] #timepoint 2
+```
+
+## Interaction Weight / Strength -------------------------------------------
+```{r, message=FALSE, warning=FALSE}
+## cell-cell communication strength tables
+T1@net$weight 
+T2@net$weight 
+```
+
+## Plotting communication strength
+
+```{r, message=FALSE, warning=FALSE}
+
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(T1@net$weight, vertex.weight = as.numeric(table(T1@idents)), arrow.size = 0.1,
+                 weight.scale = T, label.edge= F, title.name = "T1 interaction strength", margin = 0.01)
+netVisual_circle(T2@net$weight, vertex.weight = as.numeric(table(T2@idents)), arrow.size = 0.1,
+                 weight.scale = T, label.edge= F, title.name = "T2 interaction strength", margin = 0.01)
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Compute the network cent=rality scores
+T1 <- netAnalysis_computeCentrality(T1, slot.name = "netP")
+T2 <- netAnalysis_computeCentrality(T2,slot.name = "netP")
+
+pathways.show.all <- T1@netP$pathways #view all possible pathways 
+pathways.show.all
+levels(T1@idents)
+```
+
+# Analyzing chemokine pathways
+
+```{r, message=FALSE, warning=FALSE}
+pathways <- c("CXCL", "CCL")
+
+par(mfrow = c(1,2), xpd=TRUE)
+
+netVisual_chord_gene(T1, signaling = pathways, sources.use = c(2,3,4,5,6,13), targets.use = c(2,3,4,5,6,13), lab.cex = 0.5,legend.pos.y = 30)
+netVisual_chord_gene(T2, signaling = pathways, sources.use = c(2,3,4,5,6,13), targets.use = c(2,3,4,5,6,13), lab.cex = 0.5,legend.pos.y = 30)
+dev.off()
+
+
+```

@@ -1,0 +1,114 @@
+---
+title: "00_Ambient_RNA_Correction"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "02-10-2026"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Generating Merged Longitduinal Object with Corrected Counts
+## Loading data 
+```{r, message=FALSE, warning=FALSE}
+#################################################################
+##                      loading libraries                      ##
+############################################################################
+library(Seurat)
+library(SeuratObject)
+library(parallel)
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+source("../UTILS/correct_reads_function.r")
+
+#setwd("/nfs/turbo/umms-eicarpen/Henstridge_Longitudinal_Cancer_Discovery/SCRIPTS")
+#or can use soruce file location if file is saved in appropriate spot
+#################################################################
+##                        loading files                        ##
+#################################################################
+
+samples_info <- readxl::read_xlsx("../UTILS/sample_info_Eileen_new.xlsx")
+```
+
+## Ambient RNA Correction 
+
+It is important to enure that the proper data is loaded and that you have the corrected counts function installed above.
+
+```{r, eval=FALSE}
+#################################################################
+##           Ambient RNA Correction (w +10% and Cap)           ##
+#################################################################
+
+## Ambient RNA correction was done using soupX were the contamination fraction
+## is estimated from empty droplets and negative markers. An extra 10% was added
+## as per the authors recommendation to remove 95-98% of the soup (ambient RNA).
+## https://cran.r-project.org/web/packages/SoupX/vignettes/pbmcTutorial.html
+## while capping the contamination fraction to 20%
+
+samples_dir <- samples_info$cellranger7_output #list of my sample directories as seen in samples info
+X = as.list(samples_dir)
+samples_ID <- samples_info$sample_id 
+
+# Set generous memory limit for future package (10GB per worker should be plenty)
+options(future.globals.maxSize = 10000 * 1024^2)  # 10GB limit
+
+corrected_objs <- mclapply(samples_ID, mc.cores = detectCores(), FUN = function(x){
+  options(future.globals.maxSize = 10000 * 1024^2)
+  message(paste0(x,"..."))
+  sample <- samples_info %>% filter(sample_id == x)
+  ctMtx <- sample$cellranger7_output
+  seurat_obj <- correct_reads(data_dir = ctMtx, extra = 0.1, cap = TRUE)
+  seurat_obj$sample_id <- sample$sample_id
+  seurat_obj$timepoint <- sample$timepoint
+  seurat_obj$patient_id <- sample$patient_id
+  seurat_obj$tissue <- sample$tissue
+  seurat_obj <- RenameCells(seurat_obj, new.names = paste0(colnames(seurat_obj),"_",unique(seurat_obj$sample_id)))
+  
+  seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-", assay = "RNA")
+  seurat_obj[["percent.mt_CorrectedCounts"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-", assay = "CorrectedCounts")
+  
+  seurat_obj <- subset(seurat_obj, subset = nFeature_CorrectedCounts > 200 & percent.mt_CorrectedCounts < 15) #filter out cells and subset based on QC
+  seurat_obj <- SCTransform(seurat_obj, vst.flavor = "v2", verbose = FALSE, conserve.memory = T, assay = 'CorrectedCounts') %>%
+    RunPCA(verbose = FALSE) #Normalization 
+  
+  return(seurat_obj) 
+  gc()
+  })
+  
+names(corrected_objs) <- samples_ID                      
+saveRDS(corrected_objs, "../OBJECTS/temp.rds")
+```
+
+This temp.RDS object will be processed in further objects. 

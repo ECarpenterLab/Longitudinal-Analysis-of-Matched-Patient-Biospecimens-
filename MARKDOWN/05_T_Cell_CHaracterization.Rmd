@@ -1,0 +1,475 @@
+---
+title: "05_PT_Cell_Characterization"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-02-11"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+
+You will use the subsetted objects from the previous script. 
+
+```{r, message=FALSE, warning=FALSE}
+
+
+##T-Cells signatures
+##Aylin Henstridge 2/5/2026
+
+library(Seurat)
+library(AUCell)
+library(monocle3) #need this for the assay function in aucell script
+library(GSVA)
+library(pheatmap)
+library(tidyverse)
+library(RColorBrewer)
+library(readxl)
+library(DT)
+library(fgsea)
+library(msigdbr)
+library(viridis)
+`%nin%` <- Negate(`%in%`)
+getPalette <- colorRampPalette(brewer.pal(9, 'Set1'))
+######################################################################################################################################
+#Subsetted objects
+#Read in the objects from the subsetting script (01)
+T_Cells <- readRDS("../OBJECTS/T_Cells_subset.rds")
+```
+
+```{r message=FALSE, warning=FALSE}
+DefaultAssay(T_Cells) <- "integrated"
+# dimension reduction and clustering of integrated object
+T_Cells <- RunPCA(T_Cells, verbose = FALSE)
+ElbowPlot(T_Cells, 50)
+T_Cells <- RunUMAP(T_Cells, reduction = "pca", dims = 1:25, verbose = FALSE)
+T_Cells <- FindNeighbors(T_Cells, reduction = "pca", dims = 1:25)
+T_Cells <- FindClusters(T_Cells, resolution = 1.8)
+T_Cells[["tcell_seurat_clusters"]] <- Idents(object = T_Cells)
+```
+
+```{r, message=FALSE, warning=FALSE}
+DimPlot(object =T_Cells, reduction = "umap", pt.size = 0.1, label = T, repel = T, cols = getPalette(length(levels(T_Cells))))
+```
+
+# Name T-Cell Sub-Clusters
+
+## Look at gene expression with feature plots 
+```{r, message=FALSE, warning=FALSE}
+DefaultAssay(T_Cells) <- "SCT"
+FeaturePlot(object = T_Cells, features = c("TCF7","SELL","LEF1","CCR7", 'CD28'), cols = c("grey", "red"), reduction = "umap", pt.size = .5) #Navie
+FeaturePlot(object = T_Cells, features = c("EOMES", "GZMB", "GZMK", "LAG3", "IFNG", "TIGIT", "HAVCR2", "CTLA4", "IL2RA"), cols = c("grey", "red"), reduction = "umap", pt.size = .5) #Exhausted
+FeaturePlot(object = T_Cells, features = c("CD3E", "CD4", "CD8A"), cols = c("grey", "red"), reduction = "umap", pt.size = .5, order = T) #CD4andCD8
+FeaturePlot(object = T_Cells, features = c("IL2RA","CD4","FOXP3","IKZF2"), cols = c("grey", "red"), reduction = "umap", pt.size = .5) #Tregs
+FeaturePlot(object = T_Cells, features = c("PTPRC","CCR7","ITGAE","CD69"), cols = c("grey", "red"), reduction = "umap", pt.size = .5) #Tissue resident memory
+FeaturePlot(object = T_Cells, features = c("PTPRC","CCR7","ITGAE","CD69","FASLG","CD28" ), cols = c("grey", "red"), reduction = "umap", pt.size = .5) #Memory Classification
+FeaturePlot(object = T_Cells, features = c("KLRG1","IL7R" ), cols = c("grey", "red"), reduction = "umap", pt.size = .5) #MemoryProg
+FeaturePlot(object = T_Cells, features = c("KLRC1","KLRD1","NKG7", 'CD3E' ), cols = c("grey", "red"), reduction = "umap", pt.size = .5, order = T) #NK cells
+FeaturePlot(object = T_Cells, features = c("AREG", "NSG1", "LTB"), cols = c("grey", "red"), reduction = "umap", pt.size = .5) 
+FeaturePlot(object = T_Cells, features = c("RORC", "CCR6", 'CCR7'), cols = c("grey", "red"), reduction = "umap", pt.size = .5, order = T) #Exhausted
+FeaturePlot(object = T_Cells, features = c("CD27", "IL7R", 'FOXP1', 'CXCR4'), cols = c("grey", "red"), reduction = "umap", pt.size = .5, order = T) #Exhausted
+FeaturePlot(object = T_Cells, features = c('KRT20', 'CEACAM1', 'CA2', 'INS'), cols = c("grey", "red"), reduction = "umap", pt.size = .01, order = T) #platelet
+```
+
+## Use gene expression to determine Level2Labels for T-Cells
+Level2Labels are the finest sub-clustering of the T-Cells.
+
+```{r, message=FALSE, warning=FALSE}
+DotPlot(object = T_Cells, features = c('CD3E', 'CD8A','GZMB', 'ZNF683', 'GZMK', 'EOMES',  'CCR7', 'SELL', 'CD4',  'FOXP3',   'RORC', 'CCR6', 'NKG7', 'NCAM1'), cols = c("white", "magenta4")) +theme(legend.position = "right",
+                                                                                                                                                                                                     axis.text.x = element_text(angle = 45, size = 10,  hjust = 1))
+T_Cells <- PrepSCTFindMarkers(T_Cells, assay = "SCT", verbose = TRUE)
+markers <- FindAllMarkers(T_Cells, assay = 'SCT', min.pct = 0.25, only.pos = T)
+write.csv(markers, file = "../DATA/tcell.markers.csv")
+```
+
+## Name the clusters level 1
+```{r, message=FALSE, warning=FALSE}
+Idents(object = T_Cells) <- 'tcell_seurat_clusters'
+levels(T_Cells)
+DimPlot(T_Cells, label = T)
+current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14, 15, 16, 17, 18, 19, 20, 21)
+new.cluster.ids <- c('CD4T', 'CD8T', 'CD4T', 'CD4T', 'NK', 'CD8T',
+                     'CD8T', 'NK', 'CD4T', 'NK', 'TReg',
+                     'CD8T', 'CD4T', 'CD8T','NKT', 'CD4T',
+                     'CD8T', 'Naive - CD8T', 'CD8T', 'CD4T', 'CD4T', 'CD8T')
+names(x = new.cluster.ids) <- levels(x = T_Cells)
+T_Cells<- RenameIdents(object = T_Cells, new.cluster.ids)
+T_Cells[["Level1Labels_T_Cell"]] <- Idents(object = T_Cells)
+DimPlot(T_Cells, label = T)
+```
+
+## Name the clusters level 2
+```{r, message=FALSE, warning=FALSE}
+
+Idents(object = T_Cells) <- 'tcell_seurat_clusters'
+levels(T_Cells)
+DimPlot(T_Cells, label = T)
+current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14, 15, 16, 17, 18, 19, 20, 21, 22)
+new.cluster.ids <- c('CD4T', 'Exhausted CD8T', 'CD4T', 'CD4T', 'NK', 'Exhausted CD8T', 
+                     'Cytotoxic CD8T', 'NK', 'CD4T','NK', 'TReg',
+                     'Cytotoxic CD8T', 'CD4T', 'Cytotoxic CD8T', 'NKT', 'CD4T', 
+                     'Exhausted CD8T', 'Naive CD8T', 'Cytotoxic CD8T', 'CD4T', 'CD4T', 'Exhausted CD8T')
+names(x = new.cluster.ids) <- levels(x = T_Cells)
+T_Cells<- RenameIdents(object = T_Cells, new.cluster.ids)
+```
+
+```{r, message=FALSE, warning=FALSE}
+DimPlot(object =T_Cells, reduction = "umap", pt.size = 0.1, label = T, repel = T, cols = getPalette(length(levels(T_Cells))))
+T_Cells[["Level2Labels_T_Cell"]] <- Idents(object = T_Cells)
+```
+
+```{r, message= FALSE, warning=FALSE}
+Idents(object = T_Cells) <- 'Level2Labels_T_Cell'
+levels(T_Cells)
+Idents(T_Cells) <- factor(Idents(T_Cells), levels = rev(c("Cytotoxic CD8T", 'Exhausted CD8T', 'Naive CD8T', 'CD4T', 'TReg',  'NKT','NK')))
+
+DotPlot(object = T_Cells, features = c('CD3E', 'CD8A','GZMB', 'ZNF683', 'GZMK', 'EOMES',  'CCR7', 'SELL', 'CD4',  'FOXP3',  'NKG7', 'NCAM1'), cols = c("white", "magenta4")) +theme(legend.position = "right",
+                                                                                                                                                                                    axis.text.x = element_text(angle = 45, size = 10,  hjust = 1))
+```
+
+```{r, message= FALSE, warning=FALSE}
+DimPlot(object =T_Cells, reduction = "umap", pt.size = 0.1, label = F, repel = T, cols = c("Cytotoxic CD8T" = "aquamarine2", 
+                                                                                           "Exhausted CD8T" = "coral1",
+                                                                                           "TReg" = "sienna3",
+                                                                                           "CD4T" = "violetred",
+                                                                                           "Naive CD8T" = "lavender",
+                                                                                           "Macrophage" = "peachpuff", 
+                                                                                           "NK" = "yellow", 
+                                                                                           "Mast" = "chartreuse1",
+                                                                                           "NKT" = "lightskyblue1"
+))
+```
+
+```{r, eval=FALSE}
+saveRDS(T_Cells, "../OBJECTS/Annotated_longitudinal_T_cell_AH.rds")
+```
+
+The object above is what will be used in future analysis. 
+# Cell frequency charts
+
+```{r, message= FALSE, warning=FALSE}
+#Let's make some histograms
+#Now let's do a histogram by patient and time point
+#splitting samples
+
+samples.list <- unique(T_Cells$sample_id)
+clusters <- lapply(samples.list, function(x){
+  subset <- subset(T_Cells, subset = sample_id == x)
+  dist <- data.frame(table(subset$Level2Labels_T_Cell))
+  
+  return(dist)
+})
+
+names(clusters) <- samples.list
+
+#calculate relative freq (fractions) of each cell type
+clusters_percent <- lapply(clusters, FUN = function(x){
+  summ <- sum(x$Freq)
+  x$Freq <- (x$Freq/summ)
+  return(x)
+})
+levels(T_Cells)
+#making things ggplot-friendly!
+clusters_dist <- reshape2::melt(clusters, id.var = "Var1")
+colnames(clusters_dist) <- c("Level2Labels_T_Cells","variable","value","sample_id")   
+clusters_percent_dist <- reshape2::melt(clusters_percent, id.var = "Var1")
+colnames(clusters_percent_dist) <- c("Level2Labels_T_Cell","variable","value","sample_id")
+
+ggplot(clusters_percent_dist, aes(fill=Level2Labels_T_Cell, y = value, x = sample_id)) + 
+  scale_x_discrete(limits = c('1402_T1', '1402_T2', '1550_T1', '1550_T2', '1471_T1', '1471_T2', '1475_T1', '1475_T2', '1529_T1', '1529_T2')) +
+  geom_bar(position = "stack", stat = "identity") + 
+  theme_bw() +
+  theme(legend.position = "right",
+        axis.text.x = element_text(angle = 45, size = 8, face = "bold", hjust = 1)) +
+  ylab("count") + xlab("patient_id") + ggtitle("Relative Cell Types Abundance") + 
+  scale_fill_manual(values = c("aquamarine2", 'coral1', 'violetred', 'yellow', 'sienna3', 'lightskyblue1', 'lavender'))
+```
+
+# Downstream Analysis of T_Cells
+```{r, message= FALSE, warning=FALSE}
+tcell <- subset(T_Cells, idents = c("Cytotoxic CD8T", "Exhausted CD8T", "CD4T", "TReg", "Naive CD8T"))
+DimPlot(tcell)
+```
+
+```{r, message= FALSE, warning=FALSE}
+#make an interactive data table to search for genes present in clusters. 
+DefaultAssay(object = tcell) <- "CorrectedCounts" #make sure you always use corrected counts when finding markers
+tcell <- NormalizeData(tcell, normalization.method = "LogNormalize", scale.factor = 10000)
+tcell <- FindVariableFeatures(tcell, selection.method = "vst", nfeatures = 2000, assay = "CorrectedCounts")
+tcell <- ScaleData(tcell)
+markers <- FindAllMarkers(tcell, assay = "CorrectedCounts", min.pct = 0.25, only.pos = T) 
+datatable((markers), filter = 'top', caption = "Seurat Cluster Markers", options = list(scrollX = T))
+```
+
+# DE code: Looking for differentially expressed genes in T Cells
+```{r, message= FALSE, warning=FALSE}
+Idents(object = tcell) <- 'timepoint'
+levels(tcell)
+tcell <- ScaleData(tcell, features = rownames(tcell))
+tcell.markers <- FindMarkers(tcell, ident.1 = "1", ident.2 = "2", assay = "CorrectedCounts", test.use = "MAST", verbose = FALSE, recorrect_umi = FALSE, logfc.threshold = 0)
+#the verbose, prepsctfindmarkers, SCT assay, and recorrect umi are all only included if SCT assay is used. you can leave off for corrected counts. 
+write.csv(tcell.markers, file = "../DATA/tcell_scaled_DE.csv")
+datatable((tcell.markers), filter = 'top', caption = "tcell Scaled DE Markers", options = list(scrollX = T))
+```
+
+```{r, eval=FALSE}
+saveRDS(tcell, "../OBJECTS/TCELL_Analysis_AH.RDS")
+```
+
+# Subset CD4 T Cells
+```{r, message= FALSE, warning=FALSE}
+Idents(tcell) <- "Level2Labels_T_Cell"
+levels(tcell)
+
+CD4 <- subset(tcell, idents = c("CD4T")) 
+CD8 <- subset(tcell, idents = c("Cytotoxic CD8T", "Exhausted CD8T", "Naive CD8T"))
+Treg <- subset(tcell, idents = c("TReg"))
+```
+
+# Slope Plots looking at patient specific changes
+```{r, message= FALSE, warning=FALSE}
+#TIGIT , CD44, CXCR4, CXCL12 (in CD4 & CD8 TCELLS SEPERATELY)
+DefaultAssay(CD4) <- "CorrectedCounts"
+genes <- c('TIGIT', 'CD44', 'CXCR4', 'CXCL12')
+expr_data_CD4 <- FetchData(CD4, vars = genes)
+expr_data_CD4$patient_id <- CD4@meta.data$patient_id
+expr_data_CD4$timepoint <- CD4@meta.data$timepoint
+avg_expr <- expr_data_CD4 %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(genes), mean, na.rm = TRUE), .groups = "drop")
+
+avg_expr_long <- avg_expr %>%
+  pivot_longer(cols = all_of(genes), names_to = "gene", values_to = "avg_expr")
+
+ggplot(avg_expr_long, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+DefaultAssay(CD8) <- "CorrectedCounts"
+expr_data_CD8 <- FetchData(CD8, vars = genes)
+expr_data_CD8$patient_id <- CD8@meta.data$patient_id
+expr_data_CD8$timepoint <- CD8@meta.data$timepoint
+avg_expr <- expr_data_CD8 %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(genes), mean, na.rm = TRUE), .groups = "drop")
+
+avg_expr_long <- avg_expr %>%
+  pivot_longer(cols = all_of(genes), names_to = "gene", values_to = "avg_expr")
+
+ggplot(avg_expr_long, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+```
+
+## CXCR4 is increased post-treatment in all t-cells, further analysis of these cells. 
+```{r, message=FALSE, warning=FALSE}
+DefaultAssay(tcell) <- "CorrectedCounts"
+FeaturePlot(T_Cells, features = c("CXCR4"), reduction = "umap", 
+            split.by = "timepoint", pt.size = 0.5) & scale_color_gradientn(colours =rev(brewer.pal(n=11, name = "RdYlBu"))) & theme(legend.position = "right")  # Ensures the color bar is visible
+```
+
+## Looking at inhibitory and stimulatory 
+```{r, message=FALSE, warning=FALSE}
+Inhibitory  <- c("BTLA", 'CTLA4', 'HAVCR2', 'PDCD1', 'TIGIT', 'TNFRSF18')
+Stimulatory <- c('CD27', 'CD28', 'CD40LG', 'ICOS', 'TNFRSF4', 'TNFRSF9')
+
+expr_data_CD4 <- FetchData(CD4, vars = Inhibitory)
+expr_data_CD4$patient_id <- CD4@meta.data$patient_id
+expr_data_CD4$timepoint <- CD4@meta.data$timepoint
+avg_expr <- expr_data_CD4 %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(Inhibitory), mean, na.rm = TRUE), .groups = "drop")
+
+avg_expr_long <- avg_expr %>%
+  pivot_longer(cols = all_of(Inhibitory), names_to = "gene", values_to = "avg_expr")
+
+ggplot(avg_expr_long, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Inhibitory Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+```
+
+```{r, message=FALSE, warning=FALSE}
+expr_data_CD4 <- FetchData(CD4, vars = Stimulatory)
+expr_data_CD4$patient_id <- CD4@meta.data$patient_id
+expr_data_CD4$timepoint <- CD4@meta.data$timepoint
+avg_expr <- expr_data_CD4 %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(Stimulatory), mean, na.rm = TRUE), .groups = "drop")
+
+avg_expr_long <- avg_expr %>%
+  pivot_longer(cols = all_of(Stimulatory), names_to = "gene", values_to = "avg_expr")
+
+ggplot(avg_expr_long, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Stimulatory Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+```
+
+```{r, message=FALSE, warning=FALSE}
+expr_data_CD8 <- FetchData(CD8, vars = Inhibitory)
+expr_data_CD8$patient_id <- CD8@meta.data$patient_id
+expr_data_CD8$timepoint <- CD8@meta.data$timepoint
+avg_expr <- expr_data_CD8 %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(Inhibitory), mean, na.rm = TRUE), .groups = "drop")
+
+avg_expr_long <- avg_expr %>%
+  pivot_longer(cols = all_of(Inhibitory), names_to = "gene", values_to = "avg_expr")
+
+ggplot(avg_expr_long, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+```
+
+```{r, message=FALSE, warning=FALSE}
+expr_data_CD8 <- FetchData(CD8, vars = Stimulatory)
+expr_data_CD8$patient_id <- CD8@meta.data$patient_id
+expr_data_CD8$timepoint <- CD8@meta.data$timepoint
+avg_expr <- expr_data_CD8 %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(Stimulatory), mean, na.rm = TRUE), .groups = "drop")
+
+avg_expr_long <- avg_expr %>%
+  pivot_longer(cols = all_of(Stimulatory), names_to = "gene", values_to = "avg_expr")
+
+ggplot(avg_expr_long, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(ggpubr)
+Idents(CD4) <- "timepoint"
+Idents(CD8) <- "timepoint"
+VlnPlot(CD4, features = c("CXCR4"), pt.size = 0, cols = c("pink", "magenta")) + stat_compare_means(method = "wilcox.test")
+VlnPlot(CD8, features = c("CXCR4"), pt.size = 0, cols = c("pink", "magenta"))+ stat_compare_means(method = "wilcox.test")
+```
+
+## Checking CAFs
+```{r, message=FALSE, warning=FALSE}
+
+cafs <- readRDS("../OBJECTS/Annotated_Fibro_AH.rds")  
+Idents(cafs) <- "time_point"
+VlnPlot(cafs, features = c('CXCL12'), pt.size = 0, cols = c("pink", "magenta"))   
+VlnPlot(cafs, features = c('CXCR4'), pt.size = 0, cols = c("pink", "magenta"))   
+```
+
+## Looking at CXCR4 in T-Cell Subsets
+```{r, message=FALSE, warning=FALSE}
+###########TIGIT/CXCR4 Subset###########################
+Idents(tcell) <- "Level2Labels_T_Cell"
+features <- c("TIGIT", "CXCR4")
+cyto <- subset(tcell, idents = c("Cytotoxic CD8T"))
+exh <- subset(tcell, idents = c("Exhausted CD8T"))
+TReg <- subset(tcell, idents = c("TReg"))
+
+expr_data_cyto <- FetchData(cyto, vars = features)
+expr_data_exh <- FetchData(exh, vars = features)
+expr_data_reg <- FetchData(TReg, vars = features)
+
+expr_data_cyto$patient_id <- cyto@meta.data$patient_id
+expr_data_exh$patient_id <- exh@meta.data$patient_id
+expr_data_reg$patient_id <- TReg@meta.data$patient_id
+
+expr_data_cyto$timepoint <- cyto@meta.data$timepoint
+expr_data_exh$timepoint <- exh@meta.data$timepoint
+expr_data_reg$timepoint <- TReg@meta.data$timepoint
+
+avg_expr_cyto <- expr_data_cyto %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(features), mean, na.rm = TRUE), .groups = "drop")
+avg_expr_exh <- expr_data_exh %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(features), mean, na.rm = TRUE), .groups = "drop")
+avg_expr_reg <- expr_data_reg %>%
+  group_by(patient_id, timepoint) %>%
+  summarise(across(all_of(features), mean, na.rm = TRUE), .groups = "drop")
+
+avg_expr_long_cyto <- avg_expr_cyto %>%
+  pivot_longer(cols = all_of(features), names_to = "gene", values_to = "avg_expr")
+avg_expr_exh <- avg_expr_exh %>%
+  pivot_longer(cols = all_of(features), names_to = "gene", values_to = "avg_expr")
+avg_expr_reg <- avg_expr_reg %>%
+  pivot_longer(cols = all_of(features), names_to = "gene", values_to = "avg_expr")
+
+ggplot(avg_expr_long_cyto, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+
+ggplot(avg_expr_exh, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+
+ggplot(avg_expr_reg, aes(x = timepoint, y = avg_expr, group = patient_id, color = patient_id)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~gene, scales = "free_y") +
+  theme_minimal() +
+  labs(title = "Average Gene Expression Before and After Treatment",
+       y = "Average Expression", x = "timepoint")
+
+
+
+```

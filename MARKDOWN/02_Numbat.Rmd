@@ -1,0 +1,277 @@
+---
+title: "02_Numbat"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-02-11"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Numbat 
+# Load all needed data and libraries
+```{r, warning=FALSE, message=FALSE}
+### Numbat Clones for Longitudinal PDAC Project
+#Adapted from Ahmed Elhoissiny Pasca Lab 
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(numbat)
+  library(tidyverse)
+  library(dplyr)
+  library(data.table)
+  library(stringr)
+  library(glue)
+  library(Matrix)
+  library(SeuratDisk)
+  library(readxl)
+  library(cowplot)
+})
+
+integrated_data <- readRDS("../OBJECTS/Annotated_Longitudinal_Object_AH.rds")
+
+samples_info <- readxl::read_xlsx("../OBJECTS/numbat/samples_info.xlsx") %>%
+  filter(project == 'longitudinal') %>%
+  select(patient_id, sample_id, tissue, timepoint)
+DT::datatable(samples_info)
+numbat_results_LLR_5_ent_0.5 <- readRDS("../OBJECTS/numbat/Numbat_Results.rds")
+cells_metadata_LLR_5_ent_0.5 <- lapply(names(numbat_results_LLR_5_ent_0.5), FUN = function(x){
+  cell_labels <- numbat_results_LLR_5_ent_0.5[[x]][[1]]
+  cell_labels <- cell_labels %>%
+    mutate(cell = paste0(cell,"_",x), clone = paste0(x,"_",clone)) %>%
+    select(cell, compartment, clone) %>%
+    column_to_rownames('cell') %>%
+    `colnames<-`(c("compartment_LLR_5_ent_0.5", "clone_LLR_5_ent_0.5"))
+}) %>% bind_rows() 
+
+numbat_results_LLR_2_ent_1 <- readRDS("../OBJECTS/numbat/Numbat_Results_LLR_2_Ent_1.rds")
+cells_metadata_LLR_2_ent_1 <- lapply(names(numbat_results_LLR_2_ent_1), FUN = function(x){
+  cell_labels <- numbat_results_LLR_2_ent_1[[x]][[1]]
+  cell_labels <- cell_labels %>%
+    mutate(cell = paste0(cell,"_",x), clone = paste0(x,"_",clone)) %>%
+    select(cell, compartment, clone) %>%
+    column_to_rownames('cell') %>%
+    `colnames<-`(c("compartment_LLR_2_ent_1", "clone_LLR_2_ent_1"))
+}) %>% bind_rows()
+
+integrated_data <- AddMetaData(integrated_data, cells_metadata_LLR_5_ent_0.5)
+integrated_data <- AddMetaData(integrated_data, cells_metadata_LLR_2_ent_1)
+
+integrated_data$compartment_LLR_5_ent_0.5[is.na(integrated_data$compartment_LLR_5_ent_0.5)] <- "normal"
+integrated_data$compartment_LLR_2_ent_1[is.na(integrated_data$compartment_LLR_2_ent_1)] <- "normal"
+```
+
+# Look at all tumor clones 
+## Using Entropy 1
+```{r, warning=FALSE, message=FALSE}
+##################Now look at the clones for each patient#################
+#Looking at then with entropy 1
+pt1402_samples <- read_xlsx("../../longitudinal_PDAC_project/data/samples_info.xlsx") %>%
+  filter(patient_id %in% c('1402') & tissue == "PancTumor") %>%
+  select(patient_id, sample_id, cellranger7_output, timepoint)
+
+pt1402_t1_sample <- pt1402_samples %>% filter(timepoint == 1) %>% pull(sample_id)
+pt1402_t1_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1402_t1_sample), verbose = F)
+p1 <- pt1402_t1_default$plot_clone_profile() + ggtitle("pt1402_t1_default_parameters (LLR = 2, max_ent = 1)")
+
+pt1402_t2_sample <- pt1402_samples %>% filter(timepoint == 2) %>% pull(sample_id)
+pt1402_t2_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1402_t2_sample), verbose = F)
+p2 <- pt1402_t2_default$plot_clone_profile() + ggtitle("pt1402_t2_default_parameters (LLR = 2, max_ent = 1)")
+
+plot_grid(p1, p2, nrow = 2)
+pt1402_t1_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1402_T1")
+pt1402_t2_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1402_T2")
+
+#Patient 1471
+pt1471_samples <- read_xlsx("../../longitudinal_PDAC_project/data/samples_info.xlsx") %>%
+  filter(patient_id %in% c('1471') & tissue == "PancTumor") %>%
+  select(patient_id, sample_id, cellranger7_output, timepoint)
+
+pt1471_t1_sample <- pt1471_samples %>% filter(timepoint == 1) %>% pull(sample_id)
+pt1471_t1_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1471_t1_sample), verbose = F)
+p1 <- pt1471_t1_default$plot_clone_profile() + ggtitle("pt1471_t1_default_parameters (LLR = 2, max_ent = 1)")
+
+pt1471_t2_sample <- pt1471_samples %>% filter(timepoint == 2) %>% pull(sample_id)
+pt1471_t2_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1471_t2_sample), verbose = F)
+p2 <- pt1471_t2_default$plot_clone_profile() + ggtitle("pt1471_t2_default_parameters (LLR = 2, max_ent = 1)")
+
+plot_grid(p1, p2, nrow = 2)
+pt1471_t1_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1471_T1")
+pt1471_t2_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1471_T2")
+
+#Patient 1475
+pt1475_samples <- read_xlsx("../../longitudinal_PDAC_project/data/samples_info.xlsx") %>%
+  filter(patient_id %in% c('1475') & tissue == "PancTumor") %>%
+  select(patient_id, sample_id, cellranger7_output, timepoint)
+
+pt1475_t1_sample <- pt1475_samples %>% filter(timepoint == 1) %>% pull(sample_id)
+pt1475_t1_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1475_t1_sample), verbose = F)
+p1 <- pt1475_t1_default$plot_clone_profile() + ggtitle("pt1475_t1_default_parameters (LLR = 2, max_ent = 1)")
+
+pt1475_t2_sample <- pt1475_samples %>% filter(timepoint == 2) %>% pull(sample_id)
+pt1475_t2_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1475_t2_sample), verbose = F)
+p2 <- pt1475_t2_default$plot_clone_profile() + ggtitle("pt1475_t2_default_parameters (LLR = 2, max_ent = 1)")
+
+plot_grid(p1, p2, nrow = 2)
+
+pt1475_t1_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1475_T1")
+pt1475_t2_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1475_T2")
+
+#Patient 1550
+pt1550_samples <- read_xlsx("../../longitudinal_PDAC_project/data/samples_info.xlsx") %>%
+  filter(patient_id %in% c('1550') & tissue == "PancTumor") %>%
+  select(patient_id, sample_id, cellranger7_output, timepoint)
+
+pt1550_t1_sample <- pt1550_samples %>% filter(timepoint == 1) %>% pull(sample_id)
+pt1550_t1_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1550_t1_sample), verbose = F)
+p1 <- pt1550_t1_default$plot_clone_profile() + ggtitle("pt1550_t1_default_parameters (LLR = 2, max_ent = 1)")
+
+pt1550_t2_sample <- pt1550_samples %>% filter(timepoint == 2) %>% pull(sample_id)
+pt1550_t2_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1550_t2_sample), verbose = F)
+p2 <- pt1550_t2_default$plot_clone_profile() + ggtitle("pt1550_t2_default_parameters (LLR = 2, max_ent = 1)")
+
+plot_grid(p1, p2, nrow = 2)
+pt1550_t1_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1550_T1")
+pt1550_t2_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1550_T2")
+
+#Patient 1529
+pt1529_samples <- read_xlsx("../../longitudinal_PDAC_project/data/samples_info.xlsx") %>%
+  filter(patient_id %in% c('1529') & tissue == "PancTumor") %>%
+  select(patient_id, sample_id, cellranger7_output, timepoint)
+
+pt1529_t1_sample <- pt1529_samples %>% filter(timepoint == 1) %>% pull(sample_id)
+pt1529_t1_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1529_t1_sample), verbose = F)
+p1 <- pt1529_t1_default$plot_clone_profile() + ggtitle("pt1529_t1_default_parameters (LLR = 2, max_ent = 1)")
+
+pt1529_t2_sample <- pt1529_samples %>% filter(timepoint == 2) %>% pull(sample_id)
+pt1529_t2_default <- Numbat$new(list.files("../../longitudinal_PDAC_project/results/02_CNV_analysis/CNV_calling_min_LLR_2_max_entropy_1/", full.names = T, pattern = pt1529_t2_sample), verbose = F)
+p2 <- pt1529_t2_default$plot_clone_profile() + ggtitle("pt1529_t2_default_parameters (LLR = 2, max_ent = 1)")
+
+plot_grid(p1, p2, nrow = 2)
+pt1529_t1_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1529_T1")
+pt1529_t2_default$plot_phylo_heatmap(clone_stack = TRUE, p_min = .9) + ggtitle("pt1529_T2")
+```
+
+## Adjusting tumor v. normal in metadata based on clones 
+```{r, message=FALSE, warning=FALSE}
+############Adjusting Clones for SPecificity##################
+table <- integrated_data@meta.data %>%
+  count(compartment_LLR_2_ent_1, clone_LLR_2_ent_1, patient_id, timepoint, name = "n_cells")
+write.csv(table, "../DATA/counts_clones.csv")
+
+#This table will show which patient and timepoints have which clones 
+#it will also show how mnay of the cells in each clones are normal v. tumor
+
+#Patient 1402 T1 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected <- integrated_data$compartment_LLR_2_ent_1
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_2"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_3"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_4"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_7"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_5"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_6"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_8"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "3079-EC-2_9"] <- "normal"
+
+#Patient 1402 T2 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6894-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6894-EC-1_2"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6894-EC-1_3"] <- "normal"
+
+#Patient1471_T1 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4358-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4358-EC-1_2"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4358-EC-1_3"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4358-EC-1_4"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4358-EC-1_5"] <- "tumor"
+
+#Patient1471_T2 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5392-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5392-EC-1_2"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5392-EC-1_3"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5392-EC-1_4"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5392-EC-1_5"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5392-EC-1_6"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5392-EC-1_7"] <- "normal"
+
+#Patient1475 T1 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4425-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4425-EC-1_2"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4425-EC-1_3"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4425-EC-1_4"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "4425-EC-1_5"] <- "normal"
+
+#Patient1475 T2 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6873-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6873-EC-1_2"] <- "normal"
+
+#Patient 1550 T1 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5570-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5570-EC-1_2"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5570-EC-1_3"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5570-EC-1_4"] <- "normal"
+
+#Patient 1550 T2corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_2"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_3"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_4"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_5"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_6"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_7"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6846-EC-1_8"] <- "normal"
+
+#Patient 1529 T21 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5161-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5161-EC-1_2"]<- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5161-EC-1_3"] <- "tumor"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "5161-EC-1_4"] <- "normal"
+
+#Patient 1529 T2 corrections
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6216-EC-1_1"] <- "normal"
+integrated_data$compartment_LLR_2_ent_1_corrected[integrated_data$clone_LLR_2_ent_1 == "6216-EC-1_2"] <- "tumor"
+
+#look at each patient now with the corrected clones
+DimPlot(integrated_data, group.by = "compartment_LLR_2_ent_1_corrected", split.by = "patient_id")
+```
+
+```{r, eval=FALSE}
+saveRDS(integrated_data, "../OBJECTS/numbat/Annotated_Numbat_longitudinal_object.rds")
+```
+
+```{r, message=FALSE, warning=FALSE}
+#re_analyze the bar plot and UMAP with the corrected clones
+DimPlot(integrated_data, group.by = "compartment_LLR_2_ent_1_corrected", order = F, split.by = "timepoint", pt.size = 0.01)
+```
+

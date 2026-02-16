@@ -1,0 +1,416 @@
+---
+title: "03_Merging_PT1475_Recurrence_Timepoint"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-02-11"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# MERGING 1475 T1, T2, T3
+```{r, message=FALSE, warning=FALSE}
+#################################################################
+##                      loading libraries                      ##
+############################################################################
+library(Seurat)
+library(SeuratObject)
+library(parallel)
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+source("../UTILS/correct_reads_function.r")
+library(dplyr)
+library(data.table)
+library(Matrix)
+library(devtools)
+library(RcppArmadillo)
+library(Rcpp)
+library(scales)
+library(pheatmap)
+library(gplots)
+library(cowplot)
+library(RColorBrewer)
+library(viridis)
+library(AUCell)
+library(SummarizedExperiment)
+`%nin%` <- Negate(`%in%`)
+getPalette <- colorRampPalette(brewer.pal(9, 'Set1'))
+
+#################################################################
+##                        loading files                        ##
+#################################################################
+
+samples_info <- readxl::read_xlsx("../UTILS/sample_info_1475.xlsx")
+```
+
+We perform ambient RNA correction and merge like we did before but this time just 1475 and its 3 timepoints.
+We use a different samples info sheet here. 
+
+# Ambient RNA
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
+#################################################################
+##           Ambient RNA Correction (w +10% and Cap)           ##
+#################################################################
+
+## Ambient RNA correction was done using soupX were the contamination fraction
+## is estimated from empty droplets and negative markers. An extra 10% was added
+## as per the authors recommendation to remove 95-98% of the soup (ambient RNA).
+## https://cran.r-project.org/web/packages/SoupX/vignettes/pbmcTutorial.html
+## while capping the contamination fraction to 20%
+##This is the same process we did when merging all T1 and T2 but now we do it with only 1475 T1,2, and 3.
+samples_dir <- samples_info$cellranger7_output #list of my sample directories as seen in samples info
+X = as.list(samples_dir)
+samples_ID <- samples_info$sample_id 
+
+
+# Set generous memory limit for future package (10GB per worker should be plenty)
+options(future.globals.maxSize = 10000 * 1024^2)  # 10GB limit
+
+corrected_objs <- mclapply(samples_ID, mc.cores = detectCores(), FUN = function(x){
+  options(future.globals.maxSize = 10000 * 1024^2)
+  message(paste0(x,"..."))
+  sample <- samples_info %>% filter(sample_id == x)
+  ctMtx <- sample$cellranger7_output
+  seurat_obj <- correct_reads(data_dir = ctMtx, extra = 0.1, cap = TRUE)
+  seurat_obj$sample_id <- sample$sample_id
+  seurat_obj$timepoint <- sample$timepoint
+  seurat_obj$patient_id <- sample$patient_id
+  seurat_obj$tissue <- sample$tissue
+  seurat_obj <- RenameCells(seurat_obj, new.names = paste0(colnames(seurat_obj),"_",unique(seurat_obj$sample_id)))
+  
+  seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-", assay = "RNA")
+  seurat_obj[["percent.mt_CorrectedCounts"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-", assay = "CorrectedCounts")
+  
+  seurat_obj <- subset(seurat_obj, subset = nFeature_CorrectedCounts > 200 & percent.mt_CorrectedCounts < 15) #filter out cells and subset based on QC
+  seurat_obj <- SCTransform(seurat_obj, vst.flavor = "v2", verbose = FALSE, conserve.memory = T, assay = 'CorrectedCounts') %>%
+    RunPCA(verbose = FALSE) #Normalization 
+  
+  return(seurat_obj) 
+  gc()
+})
+
+names(corrected_objs) <- samples_ID                      
+saveRDS(corrected_objs, "../OBJECTS/1475_temp.rds")
+```
+
+# Merging the 3 timepoints now
+You will use the 1475 temp file now like we did previously with the full object. 
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
+###########################################################################
+#              Generating Merged pt1475 Object                      #
+############################################################################
+tumor_obj <- readRDS("../OBJECTS/1475_temp.rds") #this is the list we generated above
+
+#Samples integration
+features <- SelectIntegrationFeatures(object.list = tumor_obj, nfeatures = 3000)
+tumor_obj <- PrepSCTIntegration(object.list = tumor_obj, anchor.features = features)
+anchors <- FindIntegrationAnchors(object.list = tumor_obj, normalization.method = "SCT",
+                                  anchor.features = features)
+tumor_obj <- IntegrateData(anchorset = anchors, normalization.method = "SCT") #this step takes quite a few hours, best to run over night 
+
+saveRDS(tumor_obj, "../OBJECTS/1475_T123_merged.rds")
+```
+
+# Naming clusters
+
+We will do this the same with feature plots, and can use the full Annotated object to help if needed. 
+
+```{r, message=FALSE, warning=FALSE}
+##########################################################################
+#                                  Naming Clusters                      #
+############################################################################
+
+pt1475 <- readRDS("../OBJECTS/1475_T123_merged.rds")#read in merged 1475 object from above
+
+DefaultAssay(pt1475) <- "integrated"
+# dimension reduction and clustering of integrated object
+set.seed(42)
+pt1475 <- RunPCA(pt1475, verbose = FALSE)
+pt1475 <- RunUMAP(pt1475, reduction = "pca", dims = 1:25, verbose = FALSE)
+pt1475 <- FindNeighbors(pt1475, reduction = "pca", dims = 1:25)
+pt1475 <- FindClusters(pt1475, resolution = 1.8)
+pt1475[["seurat_clusters"]] <- Idents(object = pt1475)
+
+#Look at what clusters look like at this step
+DimPlot(object =pt1475, reduction = "umap", pt.size = 0.1, label = T, repel = T)
+
+Idents(object = pt1475) <- 'seurat_clusters'
+pt1475 <- PrepSCTFindMarkers(pt1475, assay = "SCT", verbose = TRUE)
+markers <- FindAllMarkers(pt1475, assay = 'SCT', min.pct = 0.25, only.pos = T)
+write.csv(markers, file = "../DATA/pt1475.markers.csv")
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Name the clusters, we have 47 clusters and will use common gene markers to identify them. 
+DefaultAssay(pt1475) <- "SCT"
+FeaturePlot(object = pt1475, features = c("EPCAM","KRT19", "MUC1", "KRT18"), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01, order =T) #Epithelial
+FeaturePlot(object = pt1475, features = c('PRSS1', 'AMY2A'), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01, order =T) #Acinar
+FeaturePlot(object = pt1475, features = c("CDH5", "VWF"), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01,  order =T) #Endothelial 
+FeaturePlot(object = pt1475, features = c("PDGFRB", "PDGFRA", "PDPN", "ACTA2", "RGS5","PECAM1", "COL1A1", "IGFBP7"), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01, order = T) #Fibroblasts and pericyte
+FeaturePlot(object = pt1475, features = c("PTPRC", "CD14", "ITGAM", "MARCO", "APOE", "C1QA", "S100A8", "FCGR3A", "FCGR3B", "SPP1", "CD68", "HLA-DRA", 'G0S2'), cols = c("grey", "red"), reduction = "umap", pt.size = .05, order = T) #Myeloid
+FeaturePlot(object = pt1475, features = c("CD3E", "CD4", "FOXP3", "CD8A", "GZMB", "PRF1", "NKG7", "NCAM1", "MKI67"), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01, order = T) #T cells
+FeaturePlot(object = pt1475, features = c("CD19", "CD79A", "IGJ", "IGLL5", "CD27", "CD138", 'MS4A1', 'JCHAIN'), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01, order = T) #B cells
+FeaturePlot(object = pt1475, features = c("CLU", "TPSAB1", "CPA3"), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01, order = T) #Mast cells
+FeaturePlot(object = pt1475, features = c("MKI67"), cols = c("grey", "red"), reduction = "umap", pt.size = 0.01, order = T) #Cycling
+FeaturePlot(object = pt1475, features = c('IRF7', 'GZMB', 'CLEC4C'), cols = c("grey", "red"), reduction = "umap", pt.size = .01, order = T) #pDCs
+FeaturePlot(object = pt1475, features = c('PPBP', 'PF4', 'CLU'), cols = c("grey", "red"), reduction = "umap", pt.size = .01, order = T) #Platelet
+FeaturePlot(object = pt1475, features = c('KRT20', 'CEACAM1', 'CA2', 'INS'), cols = c("grey", "red"), reduction = "umap", pt.size = .01, order = T) #Platelet
+
+```
+
+
+The featureplots above will tell us what each cluster is.
+```{r, message=FALSE, warning=FALSE}
+Idents(object = pt1475) <- 'seurat_clusters'
+levels(pt1475)
+current.cluster.ids <- c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14, 15, 16, 17, 18,
+                         19, 20, 21, 22, 23, 24, 25,26, 27,28,29,30,31)
+new.cluster.ids <- c('Epi', "Granulocyte", "Granulocyte", "Fibroblast", "CD8T", "Endothelial",
+                     "CD8T","Fibroblast", "Granulocyte", "Epi", "CD8T",
+                     "Macrophage", "Fibroblast", "CD4T", "Endothelial", "Acinar",
+                     "Endothelial", "Granulocyte", "Pericyte", "B Cell", "Epi",
+                     "Pericyte", "Epi", "Fibroblast", "Epi", "Macrophage",
+                     "Fibroblast", "Nerve", "Epi", "Macrophage", "Mast", "Fibroblast")
+names(x = new.cluster.ids) <- levels(x = pt1475)
+pt1475<- RenameIdents(object = pt1475, new.cluster.ids)
+
+DimPlot(object =pt1475, reduction = "umap", pt.size = 0.1, label = T, repel = T)
+pt1475[["Level1Labels_Merged"]] <- Idents(object = pt1475)
+Idents(object = pt1475) <- 'Level1Labels_Merged'
+levels(pt1475)
+```
+
+```{r, eval=FALSE}
+saveRDS(pt1475, "../OBJECTS/Annotated_pt1475_Object_AH.rds") 
+```
+
+# Cell Frequency Plot
+```{r, message=FALSE, warning=FALSE}
+#Let's make some histograms
+Idents(pt1475) <- "sample_id"
+levels(pt1475)
+pt1475$sample_id[pt1475$sample_id == "6873-EC-1"] <- "1475_T2"
+pt1475$sample_id[pt1475$sample_id == "4425-EC-1"] <- "1475_T1"
+pt1475$sample_id[pt1475$sample_id == "9241-EC-1"] <- "1475_T3"
+
+levels(pt1475)
+
+Idents(pt1475) <- "Level1Labels_Merged"
+pt1475$Level1Labels_Merged <- droplevels(pt1475@meta.data$Level1Labels_Merged)
+
+#Now let's do a histogram by patient and time point
+levels(pt1475)
+Idents(pt1475) <- factor(Idents(pt1475), levels = rev(c('Epi', 'Acinar', 'Fibroblast', 'Pericyte', 'Endothelial', 'Macrophage', 'Granulocyte',  'Mast','CD8T',  'CD4T', 'Nerve', 
+                                                                    'B Cell')))
+#splitting samples
+samples.list <- unique(pt1475$sample_id)
+clusters <- lapply(samples.list, function(x){
+  subset <- subset(pt1475, subset = sample_id == x)
+  dist <- data.frame(table(subset$Level1Labels_Merged))
+  
+  return(dist)
+})
+
+names(clusters) <- samples.list
+
+#calculate relative freq (fractions) of each cell type
+clusters_percent <- lapply(clusters, FUN = function(x){
+  summ <- sum(x$Freq)
+  x$Freq <- (x$Freq/summ)
+  return(x)
+})
+levels(pt1475)
+#making things ggplot-friendly!
+clusters_dist <- reshape2::melt(clusters, id.var = "Var1")
+colnames(clusters_dist) <- c("Level1Labels_Merged","variable","value","sample_id")   
+clusters_percent_dist <- reshape2::melt(clusters_percent, id.var = "Var1")
+colnames(clusters_percent_dist) <- c("Level1Labels_Merged","variable","value","sample_id")
+
+ggplot(clusters_percent_dist, aes(fill=Level1Labels_Merged, y = value, x = sample_id)) + 
+  scale_x_discrete(limits = c('1475_T1', '1475_T2', '1475_T3')) +
+  geom_bar(position = "stack", stat = "identity") + 
+  theme_bw() +
+  theme(legend.position = "right",
+        axis.text.x = element_text(angle = 45, size = 8, face = "bold", hjust = 1)) +
+  ylab("count") + xlab("patient_id") + ggtitle("Relative Cell Types Abundance") +
+  scale_fill_manual(values = c("wheat3", "peachpuff","aquamarine2", 'seagreen4','coral1', 'goldenrod', 'mediumorchid4', 'sienna3', 'lightskyblue1', 'yellow', 'magenta', 'lavender', 'thistle', 'violetred', 'dodgerblue3', 'chartreuse1'))
+
+```
+
+# Characterizing Fibroblasts Specifically 
+```{r, message=FALSE, warning=FALSE}
+#pick up here with fibroblasts
+DefaultAssay(pt1475) <- "RNA"
+pt1475 <- JoinLayers(pt1475)
+DefaultAssay(pt1475) <- "CorrectedCounts"
+pt1475_fibros <- subset(pt1475, idents = "Fibroblast")
+pt1475 <- ScaleData(pt1475)
+```
+
+```{r, eval=FALSE}
+#save fibroblast object separate 
+saveRDS(pt1475_fibros, "../OBJECTS/1475_T1_T2_T3_FIBROS.RDS")
+saveRDS(pt1475, "../OBJECTS/1475_merged_CORRECTED.rds")
+```
+
+```{r, message=FALSE, warning=FALSE}
+##Fibroblast Heatmap Expression
+fibro <- readRDS("../OBJECTS/1475_T1_T2_T3_FIBROS.RDS")
+```
+
+
+## Gene signatures
+```{r, message=FALSE, warning=FALSE}
+library(readxl)
+mycaf_icaf <- read_excel("../GENE_SIGNATURES/MYCAF_ICAF.xlsx")
+mycaf <- mycaf_icaf$mycaf
+icaf <- mycaf_icaf$icaf
+apcaf <- mycaf_icaf$apcaf
+
+mycaf_icaf <- list(
+  mycaf = mycaf,
+  icaf = icaf,
+  apcaf = apcaf
+)
+expr <- GetAssayData(fibro,
+                     assay = "CorrectedCounts",
+                     layer = "counts")
+
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+
+auc_score_2 <- AUCell_calcAUC(rankings = geneRanking, geneSets = mycaf_icaf, aucMaxRank = nrow(geneRanking)*0.1)
+
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score_2 <- as.data.frame(t(assay(c(auc_score_2))))
+auc_score_scaled_2 <- as.data.frame(scale(auc_score_2))
+#scaled the data and add it as metadata
+fibro <- AddMetaData(fibro, metadata = auc_score_scaled_2)
+
+## Heatmap of AUCELL Scoring
+tissue_cell_data <- FetchData(fibro, vars = c('mycaf','icaf','sample_id'))
+n <- 1 # number of metadata columns
+patient_avg <- data.frame()
+for (id in levels(factor(tissue_cell_data$sample_id))) {
+  data_subset <- tissue_cell_data %>% filter(sample_id == id)
+  data_subset_avg <- apply(data_subset[,1:(ncol(data_subset)-n)], 2, mean)
+  patient_avg <- rbind(patient_avg, data_subset_avg)
+}
+colnames(patient_avg) <- colnames(tissue_cell_data)[1:(ncol(tissue_cell_data)-n)]
+rownames(patient_avg) <- levels(factor(tissue_cell_data$sample_id))
+```
+
+```{r, message=FALSE, warning=FALSE}
+pheatmap(patient_avg, 
+                    color = colorRampPalette(c("blue", "white", "red"))(256),  # Color palette
+                    main = "Heatmap of Fibroblast Gene Sig.(scale by column)",   # Title of the heatmap
+                    clustering_distance_rows = "euclidean",   # Distance metric for row clustering
+                    clustering_distance_cols = "euclidean",   # Distance metric for column clustering
+                    cellwidth = 10,
+                    cellheight = 10,
+                    fontsize = 8,           # Font size of row and column labels
+                    legend = TRUE,           # Show legend
+                    cluster_rows = FALSE,   # Do not cluster rows
+                    cluster_cols = TRUE,    # Do not cluster columns
+                    width = 100,   # Adjust the width of the plot
+                    height = 100  # Adjust the height of the plot
+)
+```
+
+# Adding the NR-CAF Signature 
+
+```{r, message=FALSE, warning=FALSE}
+#NR-CAF Signature
+agf_signature <- c("NEGR1", "SLIT2", "ROBO1", "EPHA3","NRP1", "NFIA")
+AGF <- list(
+  
+  agf_signature = agf_signature
+)
+expr <- GetAssayData(fibro,
+                     assay = "CorrectedCounts",
+                     layer = "counts")
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+auc_score <- AUCell_calcAUC(rankings = geneRanking, geneSets = AGF, aucMaxRank = nrow(geneRanking)*0.1)
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score <- as.data.frame(t(assay(c(auc_score))))
+auc_score_scaled <- as.data.frame(scale(auc_score))
+
+#scaled the data and add it as metadata
+fibro <- AddMetaData(fibro, metadata = auc_score_scaled)
+
+## Define what "top expressors" means (e.g., top 10% of cells)
+agf_threshold <- quantile(fibro$agf_signature, 0.75)  # top 25%
+# 2. Create a new metadata column
+fibro$agf <- ifelse(fibro$agf_signature >= agf_threshold, "agf", "caf")
+# Check distribution
+table(fibro$agf)
+```
+
+```{r, message=FALSE, warning=FALSE}
+saveRDS(fibro, "../OBJECTS/agf_annotated_1475_CAFs.RDS")
+```
+
+# Final Heatmap
+```{r, warning=FALSE, message=FALSE}
+## Heatmap of AUCELL Scoring
+tissue_cell_data <- FetchData(fibro, vars = c('mycaf','icaf','agf_signature', 'sample_id'))
+n <- 1 # number of metadata columns
+patient_avg <- data.frame()
+for (id in levels(factor(tissue_cell_data$sample_id))) {
+  data_subset <- tissue_cell_data %>% filter(sample_id == id)
+  data_subset_avg <- apply(data_subset[,1:(ncol(data_subset)-n)], 2, mean)
+  patient_avg <- rbind(patient_avg, data_subset_avg)
+}
+colnames(patient_avg) <- colnames(tissue_cell_data)[1:(ncol(tissue_cell_data)-n)]
+rownames(patient_avg) <- levels(factor(tissue_cell_data$sample_id))
+```
+
+```{r, message=FALSE, warning=FALSE}
+pheatmap(patient_avg, 
+         color = colorRampPalette(c("blue", "white", "red"))(256),  # Color palette
+         main = "Heatmap of Fibroblast Gene Sig.(scale by column)",   # Title of the heatmap
+         clustering_distance_rows = "euclidean",   # Distance metric for row clustering
+         clustering_distance_cols = "euclidean",   # Distance metric for column clustering
+         cellwidth = 10,
+         cellheight = 10,
+         fontsize = 8,           # Font size of row and column labels
+         legend = TRUE,           # Show legend
+         cluster_rows = FALSE,   # Do not cluster rows
+         cluster_cols = TRUE,    # Do not cluster columns
+         width = 100,   # Adjust the width of the plot
+         height = 100  # Adjust the height of the plot
+)
+```
+
+

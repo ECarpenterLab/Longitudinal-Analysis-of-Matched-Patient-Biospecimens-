@@ -19,7 +19,7 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
 
 - **`OBJECTS/`**  
   Contains processed and annotated Seurat objects generated from:
-  - [`MARKDOWN/00_ambient_RNA_correction.Rmd`](MARKDOWN/00_ambient_RNA_correction.Rmd)
+  - [`/MARKDOWN/00_ambient_RNA_correction.rmd`](/MARKDOWN/00_ambient_RNA_correction.rmd)
   - [`MARKDOWN/01_Generating_Merged_annotation.Rmd`](MARKDOWN/01_Generating_Merged_annotation.Rmd)
 
   Newly generated objects from MARKDOWN `#00` should be saved here.

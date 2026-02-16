@@ -20,7 +20,7 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
 - **`OBJECTS/`**  
   Contains processed and annotated Seurat objects generated from:
   - [`/MARKDOWN/00_ambient_RNA_correction.rmd`](/MARKDOWN/00_ambient_RNA_correction.rmd)
-  - [`/MARKDOWN/01_Generating_Merged_annotation.Rmd`](/MARKDOWN/01_Generating_Merged_annotation.Rmd)
+  - [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
 
   Newly generated objects from MARKDOWN `#00` should be saved here.
 
@@ -30,7 +30,7 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
 - **`DOCUMENTS/`**  
   Contains the rendered markdown files as .html files. 
   - [`/MARKDOWN/00_ambient_RNA_correction.rmd`](/MARKDOWN/00_ambient_RNA_correction.rmd)
-  - [`/MARKDOWN/01_Generating_Merged_annotation.Rmd`](/MARKDOWN/01_Generating_Merged_annotation.Rmd)
+  - [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
 
 ---
 
@@ -44,7 +44,7 @@ Ambient RNA contamination was corrected using
 [SoupX](https://github.com/constantAmateur/SoupX)  
 as implemented in:
 
-- [`/MARKDOWN/00_ambient_RNA_correction.Rmd`](/MARKDOWN/00_ambient_RNA_correction.Rmd)
+- [`/MARKDOWN/00_ambient_RNA_correction.rmd`](/MARKDOWN/00_ambient_RNA_correction.rmd)
 
 ---
 
@@ -52,7 +52,7 @@ as implemented in:
 
 Longitudinal clusters were labeled and subset using previously published markers:
 
-- [`/MARKDOWN/01_Generating_Merged_annotation.Rmd`](/MARKDOWN/01_Generating_Merged_annotation.Rmd)
+- [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
 
 ---
 
@@ -61,7 +61,7 @@ Longitudinal clusters were labeled and subset using previously published markers
 Published and internally derived gene signatures were mapped onto extracted cancer-associated fibroblasts using  
 [AUCell](https://github.com/aertslab/AUCell), as implemented in:
 
-- [`/MARKDOWN/07_Fibroblast_Cell_Characterization.Rmd`](/MARKDOWN/07_Fibroblast_Cell_Characterization.Rmd)
+- [`/MARKDOWN/07_Fibroblast_object_characterization.Rmd`](/MARKDOWN/07_Fibroblast_object_characterization.Rmd)
 
 ---
 
@@ -69,7 +69,7 @@ Published and internally derived gene signatures were mapped onto extracted canc
 
 Inferred copy number variation (CNV) analysis of epithelial populations was performed using:
 
-- [`/MARKDOWN/02_Numbat.R`](/MARKDOWN/02_Numbat.R)
+- [`/MARKDOWN/02_Numbat.Rmd`](/MARKDOWN/02_Numbat.Rmd)
 
 Ductal cells from healthy donor pancreata were used as the reference population.
 
@@ -80,7 +80,7 @@ Ductal cells from healthy donor pancreata were used as the reference population.
 Each major cell type was analyzed independently:
 
 - **T cells**:  
-  [`/MARKDOWN/05_T_Cell_Characterization.Rmd`](/MARKDOWN/05_T_Cell_Characterization.Rmd)
+  [`/MARKDOWN/05_T_Cell_CHaracterization.Rmd`](/MARKDOWN/05_T_Cell_CHaracterization.Rmd)
 
 - **Myeloid cells**:  
   [`/MARKDOWN/06_Myeloid_Cell_Characterization.Rmd`](/MARKDOWN/06_Myeloid_Cell_Characterization.Rmd)

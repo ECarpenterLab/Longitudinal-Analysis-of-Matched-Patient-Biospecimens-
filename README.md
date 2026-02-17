@@ -29,8 +29,8 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
 
 - **`DOCUMENTS/`**  
   Contains the rendered markdown files as .html files. 
-  - [`/DOCUMENTS/00_ambient_RNA_correction.html`](/MARKDOWN/00_ambient_RNA_correction.html)
-  - [`/DOCUMENTS/01_Generating_Merged_Object.html`](/MARKDOWN/01_Generating_Merged_Object.html)
+  - [`/DOCUMENTS/00_ambient_RNA_correction.html`](/DOCUMENTS/00_ambient_RNA_correction.html)
+  - [`/DOCUMENTS/01_Generating_Merged_Object.html`](/DOCUMENTS/01_Generating_Merged_Object.html)
 
 ---
 

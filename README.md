@@ -23,6 +23,7 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
   - [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
 
   Newly generated objects from MARKDOWN `#00` should be saved here.
+  Seurat object with cellular deconvolution annoations for the spatial transcriptomics analysis was aquired from DOI: 10.1038/s41586-025-08927-x.
 
 - **`Utils/`**  
   Contains utility functions used across scripts for modular and reproducible analysis.

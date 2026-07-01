@@ -133,6 +133,8 @@ For full reproducibility, scripts should be run in the following general order:
 4. Cell-type–specific characterization  
 5. CAF signature mapping  
 6. Dataset integration  
-7. Cell–cell communication analysis  
+7. Cell–cell communication analysis
+8. Trajectory analysis
+9. Spatial Transcriptomics analysis
 
 ---

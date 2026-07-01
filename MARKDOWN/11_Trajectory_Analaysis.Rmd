@@ -1,0 +1,488 @@
+---
+title: "11_Trajectory_Analysis_of_Fibroblasts"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-06-24"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+```{r, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages({
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(monocle3)
+library(tidyverse)
+library(SeuratWrappers)
+})
+```
+
+# Open merged CAF object
+
+```{r}
+#Read in annotated full fibroblast object
+#This object contains healthy and treatment naive PDAC from 
+#Carpenter et al., Cancer Discovery and it contains the 
+#treatment naive and treated fibroblasts from our dataset.
+
+#This data has been fully annotated via Seurat V5 before being used in Monocle3
+fibros <- readRDS("../OBJECTS/gol_long_fibro_merged_umap.rds")
+```
+
+Now that we have merged we integrate.
+
+# Createyour CDS object for monocle3
+
+```{r}
+
+Idents(fibros) <- "Level1Labels"
+DimPlot(fibros, reduction = "integrated_umap")
+
+Idents(fibros) <- "DiseaseState"
+#this is just all fibroblasts
+set.seed(1234)
+
+#Now we covert our object to the cell dataset class we need for monocle3
+
+fibro_cds <- as.cell_data_set(fibros)
+fibro_cds
+#This is a cell data set object which is different than our Seurat
+
+```
+
+## Transfer Seurat obect and UMAP information to our object
+
+```{r, results='hide', warning=FALSE}
+#this is the cell metadata
+colData(fibro_cds)
+#This is gene metadata
+fData(fibro_cds)
+rownames(fData(fibro_cds))[1:10]
+fData(fibro_cds)$gene_short_name <- rownames(fData(fibro_cds))
+
+# Transfer Seurat UMAP embeddings to the CDS
+reducedDims(fibro_cds)[["UMAP"]] <- Embeddings(fibros, "integrated_umap")
+
+# Also transfer the cluster info
+fibro_cds@clusters[["UMAP"]]$clusters <- fibros@meta.data$Level1Labels
+fibro_cds@clusters$UMAP$clusters <- fibros@meta.data$Level1Labels
+
+#Assign all the cells to one parition
+recreate.partition <- rep(1, length(fibro_cds@colData@rownames))
+recreate.partition
+names(recreate.partition) <- fibro_cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+recreate.partition
+
+# Also manually add partitions - assign all cells to partition 1
+fibro_cds@clusters$UMAP$partitions <- recreate.partition
+Idents(fibros) <- "Level1Labels"
+fibros@active.ident
+fibros_list_cluster <- fibros@active.ident #this is the cluster information we will assign
+fibro_cds@clusters$UMAP$clusters <- fibros_list_cluster
+
+#Assign UMAP coordinate 
+fibro_cds@int_colData@listData$reducedDims$UMAP <- fibros@reductions$unintegrated_umap@cell.embeddings
+#now the point locations for our seurat unintegrated UMAP (which we used before)
+#are assigned to the cds UMAP
+
+
+```
+
+### Plot cells
+```{r, results='hide', warning=FALSE}
+
+#this is the cell metadata
+colData(fibro_cds)
+#This is gene metadata
+fData(fibro_cds)
+rownames(fData(fibro_cds))[1:10]
+fData(fibro_cds)$gene_short_name <- rownames(fData(fibro_cds))
+
+
+
+# Transfer Seurat UMAP embeddings to the CDS
+reducedDims(fibro_cds)[["UMAP"]] <- Embeddings(fibros, "integrated_umap")
+
+# Also transfer the cluster info
+fibro_cds@clusters[["UMAP"]]$clusters <- fibros@meta.data$Level1Labels
+fibro_cds@clusters$UMAP$clusters <- fibros@meta.data$Level1Labels
+
+#Assign all the cells to one parition
+recreate.partition <- rep(1, length(fibro_cds@colData@rownames))
+recreate.partition
+names(recreate.partition) <- fibro_cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+recreate.partition
+
+# Also manually add partitions - assign all cells to partition 1
+fibro_cds@clusters$UMAP$partitions <- recreate.partition
+Idents(fibros) <- "Level1Labels"
+fibros@active.ident
+fibros_list_cluster <- fibros@active.ident #this is the cluster information we will assign
+fibro_cds@clusters$UMAP$clusters <- fibros_list_cluster
+
+#Assign UMAP coordinate 
+fibro_cds@int_colData@listData$reducedDims$UMAP <- fibros@reductions$unintegrated_umap@cell.embeddings
+#now the point locations for our seurat unintegrated UMAP (which we used before)
+#are assigned to the cds UMAP
+
+#this is the cell metadata
+colData(fibro_cds)
+#This is gene metadata
+fData(fibro_cds)
+rownames(fData(fibro_cds))[1:10]
+fData(fibro_cds)$gene_short_name <- rownames(fData(fibro_cds))
+
+
+# Transfer Seurat UMAP embeddings to the CDS
+reducedDims(fibro_cds)[["UMAP"]] <- Embeddings(fibros, "integrated_umap")
+
+# Also transfer the cluster info
+fibro_cds@clusters[["UMAP"]]$clusters <- fibros@meta.data$Level1Labels
+fibro_cds@clusters$UMAP$clusters <- fibros@meta.data$Level1Labels
+
+#Assign all the cells to one parition
+recreate.partition <- rep(1, length(fibro_cds@colData@rownames))
+recreate.partition
+names(recreate.partition) <- fibro_cds@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+recreate.partition
+
+# Also manually add partitions - assign all cells to partition 1
+fibro_cds@clusters$UMAP$partitions <- recreate.partition
+Idents(fibros) <- "Level1Labels"
+fibros@active.ident
+fibros_list_cluster <- fibros@active.ident #this is the cluster information we will assign
+fibro_cds@clusters$UMAP$clusters <- fibros_list_cluster
+
+#Assign UMAP coordinate 
+fibro_cds@int_colData@listData$reducedDims$UMAP <- fibros@reductions$unintegrated_umap@cell.embeddings
+#now the point locations for our seurat unintegrated UMAP (which we used before)
+#are assigned to the cds UMAP
+```
+
+```{r, results='hide', warning=FALSE}
+#Now lets plot cells
+colnames(colData(fibro_cds))[colnames(colData(fibro_cds)) == "sample_name"] <- "sample_name_meta"
+cluster_before_trajectory <- plot_cells(fibro_cds,
+                                        color_cells_by = 'cluster',
+                                        label_groups_by_cluster = FALSE,
+                                        group_label_size = 5) +
+  theme(legend.position = "right")
+cluster_before_trajectory
+
+
+#add CAF subclsuters
+# Make sure cell order matches
+colData(fibro_cds)$CAF_labels <- fibros@meta.data[colnames(fibro_cds), "passed_level1labels"]
+colData(fibro_cds)$Treatment <- fibros@meta.data[colnames(fibro_cds), "DiseaseState"]
+
+# Verify
+cluster_names <- plot_cells(fibro_cds,
+                            color_cells_by = "DiseaseState",
+                            label_groups_by_cluster = FALSE,
+                            group_label_size = 5,
+                            labels = FALSE)+
+  scale_color_manual(values = c('red', 'blue', 'green', 'maroon', 'yellow', 'grey', 'cyan'))+
+  theme(legend.position = 'right')
+cluster_names  
+```
+
+```{r, warning=FALSE, results='hide'}
+
+#Now we runt rajectory analysis
+fibro_cds <- learn_graph(fibro_cds, use_partition = FALSE)
+P2 <- plot_cells(fibro_cds,
+                 color_cells_by = 'DiseaseState',
+                 label_groups_by_cluster = FALSE,
+                 label_branch_points = FALSE,
+                 label_roots = FALSE,
+                 label_leaves = FALSE,
+                 group_label_size = 5)
+
+#Now we need to order our cells by pseudotime, not selecting a root will create an interactive 
+#plot that let me choose the root, I will choose healthy as the root
+#then we can see how it orders
+fibro_cds <- order_cells(fibro_cds, reduction_method = "UMAP", root_pr_nodes = "Y_23")
+#we chose the root in the healthy population
+
+P1 <- plot_cells(fibro_cds,
+                 color_cells_by = 'pseudotime',
+                 label_groups_by_cluster = FALSE,
+                 label_branch_points = FALSE,
+                 label_roots = FALSE,
+                 label_leaves = FALSE,
+                 group_label_size = 5)
+```
+
+
+
+```{r, echo=FALSE}
+P1
+P2
+```
+
+```{r, results='hide', warning=FALSE}
+P3 <- plot_cells(fibro_cds,
+                 color_cells_by = 'CAF_labels',
+                 label_groups_by_cluster = FALSE,
+                 label_branch_points = FALSE,
+                 label_roots = FALSE,
+                 label_leaves = FALSE,
+                 group_label_size = 5)
+```
+
+```{r, echo=FALSE}
+P3
+```
+
+
+```{r, results='hide'}
+#Now get pseudotime values
+fibro_cds$monocle3_pseudotime  <- pseudotime(fibro_cds)
+pseudotime_values <- as.data.frame(colData(fibro_cds))
+```
+
+```{r, echo=FALSE}
+#we can now plot the pseudotime values
+ggplot(pseudotime_values,
+       aes(monocle3_pseudotime, DiseaseState,
+           fill = DiseaseState)) + geom_boxplot()
+
+ggplot(pseudotime_values,
+       aes(monocle3_pseudotime, CAF_labels,
+           fill = CAF_labels)) + geom_boxplot()
+```
+
+
+```{r, results='hide'}
+
+fibros$pseudotime <- pseudotime(fibro_cds)
+Idents(fibros) <- 'passed_level1labels'
+```
+
+```{r, echo=FALSE}
+FeaturePlot(fibros, features = "pseudotime",
+            label = T) #the darker the blue the higher the puesdotime score 
+Idents(fibros) <- 'DiseaseState'
+FeaturePlot(fibros, features = "pseudotime",
+            label = T) #the darker the blue the higher the pdeusotime score 
+```
+
+```{r, results='hide'}
+
+#adjust fibroblast metadata to create curated CAF labels
+# First check your AUCell score column names
+colnames(fibros@meta.data)
+
+# Define thresholds based on your AUCell score distribution
+#Assign CAF labels first 
+fibros@meta.data$CAF_labels <- as.character(fibros@meta.data$passed_level1labels)  #now its agCAF or CAF
+#next we want healthy fibroblasts to be fibroblasts
+
+Idents(fibros) <- "CAF_labels"
+levels(fibros)
+
+# First set all healthy patient cells to "Fibroblast"
+healthy_cells <- WhichCells(fibros, expression = DiseaseState == "Healthy")
+fibros@meta.data[healthy_cells, "CAF_labels"] <- "fibroblast"
+
+Idents(fibros) <- "CAF_labels"
+levels(fibros)
+
+# Then assign iCAF/myCAF to other_CAF cells from tumor patients only
+other_caf_cells <- WhichCells(fibros, expression = passed_level1labels == "CAF" & DiseaseState != "Healthy")
+other_meta <- fibros@meta.data[other_caf_cells, c("icaf", "mycaf")]
+
+fibros@meta.data[other_caf_cells, "CAF_labels"] <- apply(
+  other_meta, 1,
+  function(x) c("iCAF", "myCAF")[which.max(x)]
+)
+
+# Verify
+table(fibros@meta.data$CAF_labels)
+```
+
+```{r, echo=FALSE}
+DimPlot(fibros, group.by = "CAF_labels") #this shows our myCAFs, iCAFs, and agCAFs
+FeaturePlot(fibros, features = c("icaf", "mycaf")) #checking validity with aucell score
+
+#Now merge it with pseudotime score
+Idents(fibros) <- 'CAF_labels'
+FeaturePlot(fibros, features = "pseudotime",
+            label = T,
+            reduction = "integrated_umap") #the darker the blue the higher the pdeusotime score 
+```
+
+```{r, results='hide'}
+#Now look at trajectory again
+colData(fibro_cds)$CAF_subset <- fibros@meta.data[colnames(fibro_cds), "CAF_labels"]
+
+# Verify
+table(colData(fibro_cds)$CAF_subset)
+cluster_names <- plot_cells(fibro_cds,
+                            color_cells_by = "CAF_subset",
+                            label_groups_by_cluster = FALSE,
+                            group_label_size = 5,
+                            labels = FALSE)+
+  scale_color_manual(values = c('red', 'blue', 'green', 'yellow', 'grey', 'cyan'))+
+  theme(legend.position = 'right')
+```
+
+```{r, echo=FALSE}
+cluster_names  
+
+
+Q1 <- plot_cells(fibro_cds,
+                 color_cells_by = 'CAF_subset',
+                 label_groups_by_cluster = FALSE,
+                 label_branch_points = FALSE,
+                 label_roots = FALSE,
+                 label_leaves = FALSE,
+                 group_label_size = 5)
+
+Q1
+
+Q2 <- plot_cells(fibro_cds,
+                 color_cells_by = 'pseudotime',
+                 label_groups_by_cluster = FALSE,
+                 label_branch_points = FALSE,
+                 label_roots = FALSE,
+                 label_leaves = FALSE,
+                 group_label_size = 5)
+
+Q1 | Q2
+```
+
+```{r, results='hide', warning=FALSE}
+#apply AGF signature to CAFs only *tumor_only*, apply them to FIBROS too
+#Adjust metadata
+AGF <- c("NEGR1", "NRP1", "NFIA", "EPHA3", "SLIT2", "SEMA3A", "ROBO1")
+
+library(readxl)
+library(AUCell)
+
+fibros <- ScaleData(fibros)
+
+AGF <- c("NEGR1", "SLIT2", "ROBO1", "NFIA", "NRP1", "SEMA3A", "EPHA3")
+AGF_metadata <- list(
+  AGF = AGF
+)
+
+expr <- GetAssayData(fibros,
+                      assay = "CorrectedCounts",
+                      layer = "counts")
+agf <- list(
+  
+  agf = AGF
+)
+library(SummarizedExperiment)
+library(RColorBrewer)
+library(AUCell)
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+
+auc_score <- AUCell_calcAUC(rankings = geneRanking, geneSets = agf, aucMaxRank = nrow(geneRanking)*0.1)
+auc_score <- as.data.frame(t(assay(c(auc_score))))
+auc_score_scaled <- as.data.frame(scale(auc_score))
+
+fibros <- AddMetaData(fibros, metadata = auc_score_scaled)
+```
+
+```{r, echo=FALSE}
+FeaturePlot(fibros, features = c("agf"), 
+            min.cutoff = -2, max.cutoff = +2,
+            reduction = "unintegrated_umap", label = FALSE, repel = TRUE) & 
+  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+print(plot)
+
+FeaturePlot(fibros, features = c("mycaf"), 
+            min.cutoff = -2, max.cutoff = +2,
+            reduction = "unintegrated_umap", label = FALSE, repel = TRUE) & 
+  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+print(plot)
+
+FeaturePlot(fibros, features = c("icaf"), 
+            min.cutoff = -2, max.cutoff = +2,
+            reduction = "unintegrated_umap", label = FALSE, repel = TRUE) & 
+  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+print(plot)
+
+```
+
+```{r, results='hide', warning=FALSE}
+fibro_cds$monocle3_pseudotime  <- pseudotime(fibro_cds)
+pseudotime_values <- as.data.frame(colData(fibro_cds))
+```
+
+```{r, echo=FALSE}
+#we can now plot the pseudotime values
+ggplot(pseudotime_values,
+       aes(monocle3_pseudotime, CAF_subset,
+           fill = DiseaseState)) + geom_boxplot()
+
+#we can now plot the pseudotime values
+ggplot(pseudotime_values,
+       aes(monocle3_pseudotime, CAF_subset,
+           fill = CAF_subset)) + geom_boxplot()
+```
+
+```{r, results='hide'}
+#Pseudotime values for key genes in icaf, mycaf, and agf gene signatures (agf stand for neural cafs here)
+library(readxl)
+mycaf_icaf <- read_xlsx("../GENE_SIGNATURES/MYCAF_ICAF.xlsx")
+mycaf <- mycaf_icaf$mycaf
+icaf <- mycaf_icaf$icaf
+
+# Subset the CDS to just those genes
+mycaf_cds <- fibro_cds[rowData(fibro_cds)$gene_short_name %in% mycaf, ]
+
+icaf_cds <- fibro_cds[rowData(fibro_cds)$gene_short_name %in% icaf, ]
+
+agf_cds <- fibro_cds[rowData(fibro_cds)$gene_short_name %in% AGF, ]
+
+ptime <- pseudotime(fibro_cds)
+
+mycaf_cds <- mycaf_cds[, is.finite(ptime[colnames(mycaf_cds)])]
+icaf_cds  <- icaf_cds[,  is.finite(ptime[colnames(icaf_cds)])]
+agf_cds   <- agf_cds[,   is.finite(ptime[colnames(agf_cds)])]
+
+# Then re-assign pseudotime
+fibro_cds$monocle3_pseudotime <- pseudotime(fibro_cds)
+```
+
+

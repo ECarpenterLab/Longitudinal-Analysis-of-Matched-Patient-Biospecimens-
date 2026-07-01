@@ -11,7 +11,7 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
 ### Repository Structure
 
 - **`DATA/`**  
-  Contains low-size input data, spatial transcriptomics annotations, and the `samples_info` spreadsheet for scRNA-seq analysis.  
+  Contains low-size input data, annotations, and the `samples_info` spreadsheet for scRNA-seq analysis.  
   Large data files must be downloaded as described in `Data_Acquisition` prior to running scripts.
 
 - **`MARKDOWN/`**  

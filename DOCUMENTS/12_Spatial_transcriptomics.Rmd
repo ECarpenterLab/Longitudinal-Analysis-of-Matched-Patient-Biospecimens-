@@ -1,0 +1,538 @@
+---
+title: "12_Spatial_Transcriptomics"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-06-24"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+```{r, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages({
+library(Seurat)
+library(SeuratObject)
+library(SeuratWrappers)
+library(AUCell)
+library(monocle3)
+library(GSVA)
+library(pheatmap)
+library(tidyverse)
+library(RColorBrewer)
+library(DT)
+library(dplyr)
+`%nin%` <- Negate(`%in%`)
+getPalette <- colorRampPalette(brewer.pal(9, 'Set1'))
+source("../UTILS/pseudobulk_functions.R")
+})
+```
+
+# Open Spatial Object (Pei et al, 2025, Nature)
+```{r}
+PDAC_combined <- readRDS("../OBJECTS/PDAC_combined_cytospace_deconvolution.rds") #read in deconvoluted object
+#object was shared with us from published data  from DOI: 10.1038/s41586-025-08927-x
+```
+
+## Subset cell types of interest from the deconvoluted object
+We want to subset out CAFs and epithelial cells from the object.
+
+```{r, results='hide', warning=FALSE}
+PDAC_combined$celltype_cytospace <- ifelse(PDAC_combined$CAFS >= 0.8, "CAF",
+                                 ifelse(PDAC_combined$Epicells >= 0.8, "Epi", "Other"))
+
+Idents(PDAC_combined) <- "celltype_cytospace"
+levels(PDAC_combined) #We now have new metadata that says we have CAFs and EPi cells
+table(PDAC_combined$celltype_cytospace) #and it looks like we have 13376 CAFs and 3196 epithelial cells 
+
+caf_epi_cytospace <- subset(PDAC_combined, idents = c("CAF", "Epi"))
+```
+
+```{r, echo=FALSE}
+DimPlot(object =PDAC_combined, reduction = "umap", pt.size = 0.05, raster = F, label = T, repel = T, cols = getPalette(length(levels(PDAC_combined)))) 
+DimPlot(object =caf_epi_cytospace, reduction = "umap", pt.size = 0.05, raster = F, label = T, repel = T, cols = getPalette(length(levels(PDAC_combined)))) 
+```
+
+### SUBSET CAFS
+
+We will update CAF metadata and then map agCAF gene expression in the different sites. 
+
+```{r, results='hide', warning=FALSE}
+CAFs <- subset(caf_epi_cytospace, idents = c("CAF"))
+DimPlot(object =CAFs, reduction = "umap", pt.size = 0.05, raster = F, label = T, repel = T, cols = getPalette(length(levels(PDAC_combined)))) 
+
+DefaultAssay(CAFs) <- "Spatial" 
+CAFs$site[CAFs$site == "PC"] <- "Peritoneal Metastases"
+CAFs$site[CAFs$site == "Lung"] <- "Lung Metastases"
+CAFs$site[CAFs$site == "Liver"] <- "Liver Metastases"
+CAFs$site[CAFs$site == "Panc"] <- "Primary Tumor"
+
+
+genes <- c("PDGFRA", "NEGR1", "SLIT2", "ROBO1", 
+           "SEMA3A", "NRP1", "NFIA",
+           "EPHA3", "FAP",
+           "ACTA2", "CXCL12")
+Idents(CAFs) <- "site"
+```
+
+```{r, echo=FALSE}
+DotPlot(
+  object = CAFs,
+  features = genes,
+  scale = TRUE
+) +
+  scale_color_gradientn(
+    colours = rev(brewer.pal(11, "RdYlBu"))
+  ) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, size = 10, hjust = 1)
+  )
+```
+
+#### AUCELL ANALYSIS ON CAFs USING KNOWN GENE SIGNATURES
+```{r, results='hide', warning=FALSE}
+library(readxl)
+mycaf_icaf <- read_excel("../GENE_SIGNATURES/MYCAF_ICAF.xlsx")
+mycaf <- mycaf_icaf$mycaf
+icaf <- mycaf_icaf$icaf
+apcaf <- mycaf_icaf$apcaf
+
+mycaf_icaf <- list(
+  mycaf = mycaf,
+  icaf = icaf,
+  apcaf = apcaf
+)
+expr <- GetAssayData(CAFs,
+                     assay = "Spatial",
+                     layer = "counts")
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+
+auc_score_2 <- AUCell_calcAUC(rankings = geneRanking, geneSets = mycaf_icaf, aucMaxRank = nrow(geneRanking)*0.1)
+
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score_2 <- as.data.frame(t(assay(c(auc_score_2))))
+auc_score_scaled_2 <- as.data.frame(scale(auc_score_2))
+#scaled the data and add it as metadata
+CAFs <- AddMetaData(CAFs, metadata = auc_score_scaled_2)
+
+# Create the plot object and display it in the console
+FeaturePlot(CAFs, features = c("mycaf", "icaf", "apcaf"), label = FALSE, repel = TRUE, order = TRUE) & 
+  scale_colour_gradientn(scale = TRUE, limits = c(-2,2), colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+```
+
+```{r, results='hide', warning=FALSE}
+
+###___________________________________________________
+agf_signature <- c("NEGR1", "SLIT2", "ROBO1", "EPHA3","NRP1", "NFIA", 'SEMA3A')
+AGF <- list(
+  
+  agf_signature = agf_signature
+)
+expr <- GetAssayData(CAFs,
+                     assay = "Spatial",
+                     layer = "counts")
+
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+auc_score <- AUCell_calcAUC(rankings = geneRanking, geneSets = AGF, aucMaxRank = nrow(geneRanking)*0.1)
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score <- as.data.frame(t(assay(c(auc_score))))
+auc_score_scaled <- as.data.frame(scale(auc_score))
+
+#scaled the data and add it as metadata
+CAFs <- AddMetaData(CAFs, metadata = auc_score_scaled)
+FeaturePlot(CAFs, features = c("mycaf", "icaf", "agf_signature"), pt.size =1, label = FALSE, repel = TRUE, order = TRUE) & 
+  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+
+# 1. Define what "top expressors" means (e.g., top 10% of cells)
+agf_threshold <- quantile(CAFs$agf_signature, 0.75)  # top 25%
+# 2. Create a new metadata column
+CAFs$agf <- ifelse(CAFs$agf_signature >= agf_threshold, "agf", "caf")
+# Check distribution
+table(CAFs$agf)
+```
+
+# Distance Plots
+```{r, results='hide', warning=FALSE}
+
+##Find out which tumor cells are near CAFs in the whole PDAC combined objext
+Idents(PDAC_combined) <- "site"
+levels(PDAC_combined)
+PDAC_combined <- subset(PDAC_combined, idents = c("Panc"))
+Idents(PDAC_combined) <- "celltype_cytospace"
+
+#We can apply labels to the 'other' cell types downstream for now will focus on CAF and Epi. 
+NR_CAFs <- CAFs@meta.data[, "agf", drop = FALSE]
+PDAC_combined$celltype_cytospace_agf <- as.character(PDAC_combined$celltype_cytospace)  # start with broad labels
+shared_barcodes <- intersect(rownames(NR_CAFs), colnames(PDAC_combined))
+PDAC_combined$celltype_cytospace_agf[shared_barcodes] <- NR_CAFs[shared_barcodes, "agf"]
+table(PDAC_combined$celltype_cytospace_agf) #these now have Neural CAFs labeled as agf cells and the pther CAFs as caf
+
+```
+
+```{r, results='hide', warning=FALSE}
+NRCAF_Spots <- WhichCells(PDAC_combined, expression = celltype_cytospace_agf == "agf") #these are our neural CAF spots
+Epi_Spots <- WhichCells(PDAC_combined, expression = celltype_cytospace_agf == "Epi") #these are tumor cells 
+
+#Need to get coordnates from ALL tissue slices
+coords_full <- do.call(rbind, lapply(Images(PDAC_combined), function(img) {
+  GetTissueCoordinates(PDAC_combined, image = img)
+}))
+
+# Verify
+nrow(coords_full)
+ncol(PDAC_combined)  # should be close, now we know we have the coordinates for all of our image slices 
+NRCAF_Spots <- WhichCells(PDAC_combined, expression = celltype_cytospace_agf == "agf")
+Epi_Spots   <- WhichCells(PDAC_combined, expression = celltype_cytospace_agf == "Epi")
+sum(!NRCAF_Spots %in% rownames(coords_full))  # should be 0
+sum(!Epi_Spots   %in% rownames(coords_full))  # should be 0
+coords_full$sample <- gsub(".*-1_", "", rownames(coords_full))
+
+# Check samples
+unique(coords_full$sample)
+```
+
+```{r, results='hide', warning=FALSE}
+#we need to confirm the size of pixels in the visium data coordinates
+# Visium spot diameter = 55 µm (fixed by 10x Genomics)
+# We use the spot scale factor to calculate pixels per spot diameter,
+# then derive microns per pixel for biologically interpretable thresholds.
+
+img <- PDAC_combined@images[[1]]
+spot_px <- img@scale.factors$spot * ncol(img@image)  # spot diameter in pixels
+microns_per_pixel <- 55 / spot_px                          # µm per pixel
+
+cat(sprintf("Spot diameter:      %.1f pixels = 55 µm\n", spot_px))
+cat(sprintf("Scale:              %.3f µm per pixel\n",   microns_per_pixel))
+cat(sprintf("                    %.3f pixels per µm\n",  1 / microns_per_pixel))
+
+#Collect nearest-neighbor distances (Epi -> NR-CAF) across all
+#slices, then use the 25th/75th percentile as near/far cutoffs.
+samples   <- unique(coords_full$sample)
+all_dists <- c()
+
+for (s in samples) {
+  A_s <- NRCAF_Spots[grepl(paste0("_", s, "$"), NRCAF_Spots)]
+  B_s <- Epi_Spots[grepl(paste0("_", s, "$"),   Epi_Spots)]
+  if (length(A_s) < 3 || length(B_s) < 3) next
+  
+  d <- FNN::get.knnx(
+    data  = as.matrix(coords_full[A_s, c("imagerow", "imagecol")]),
+    query = as.matrix(coords_full[B_s, c("imagerow", "imagecol")]),
+    k = 1
+  )$nn.dist[, 1]
+  
+  all_dists <- c(all_dists, d)
+}
+
+near_cutoff_px <- quantile(all_dists, 0.25) #closest 25%
+far_cutoff_px  <- quantile(all_dists, 0.75) #farthest 25%
+
+near_cutoff_um <- near_cutoff_px * microns_per_pixel
+far_cutoff_um  <- far_cutoff_px  * microns_per_pixel
+
+near_cutoff_spots <- near_cutoff_px / spot_px
+far_cutoff_spots  <- far_cutoff_px  / spot_px
+
+q <- quantile(all_dists * microns_per_pixel,
+              probs = c(0.10, 0.25, 0.50, 0.75, 0.90))
+print(round(q, 1))
+
+cat(sprintf("Near cutoff (25th pct): <= %.1f px  /  <= %.1f µm  /  <= %.2f spot diameters\n",
+            near_cutoff_px, near_cutoff_um, near_cutoff_spots))
+cat(sprintf("Far  cutoff (75th pct): >= %.1f px  /  >= %.1f µm  /  >= %.2f spot diameters\n",
+            far_cutoff_px,  far_cutoff_um,  far_cutoff_spots))
+
+
+Epi_near_list <- list()
+Epi_far_list  <- list()
+skipped       <- c()
+
+for (s in samples) {
+  A_s <- NRCAF_Spots[grepl(paste0("_", s, "$"), NRCAF_Spots)]
+  B_s <- Epi_Spots[grepl(paste0("_", s, "$"),   Epi_Spots)]
+  
+  if (length(A_s) < 3 || length(B_s) < 3) {
+    skipped <- c(skipped, s)
+    next
+  }
+  
+  dists <- FNN::get.knnx(
+    data  = as.matrix(coords_full[A_s, c("imagerow", "imagecol")]),
+    query = as.matrix(coords_full[B_s, c("imagerow", "imagecol")]),
+    k = 1
+  )$nn.dist[, 1]
+  
+  Epi_near_list[[s]] <- B_s[dists <= near_cutoff_px]
+  Epi_far_list[[s]]  <- B_s[dists >= far_cutoff_px]
+  
+  cat(sprintf("  Sample %-6s | Total Epi: %4d | Near: %4d | Far: %4d\n",
+              s, length(B_s),
+              length(Epi_near_list[[s]]),
+              length(Epi_far_list[[s]])))
+}
+
+if (length(skipped) > 0) {
+  cat("\nSkipped (< 3 NR-CAF or Epi spots):", paste(skipped, collapse = ", "), "\n")
+}
+
+Epi_near_NRCAF <- unlist(Epi_near_list)
+Epi_far_NRCAF  <- unlist(Epi_far_list)
+
+cat(sprintf("Epi near NR-CAF: %d spots\n", length(Epi_near_NRCAF)))
+cat(sprintf("Epi far NR-CAF:  %d spots\n", length(Epi_far_NRCAF)))
+cat(sprintf("Total Epi:       %d spots\n", length(Epi_Spots)))
+cat(sprintf("Excluded (middle 50%%): %d spots\n",
+            length(Epi_Spots) - length(Epi_near_NRCAF) - length(Epi_far_NRCAF)))
+
+# Add labels to metadata
+PDAC_combined$Epi_NRCAF_group <- "Intermediate"
+PDAC_combined$Epi_NRCAF_group[Epi_near_NRCAF] <- "Near"
+PDAC_combined$Epi_NRCAF_group[Epi_far_NRCAF]  <- "Far"
+
+print(table(PDAC_combined$Epi_NRCAF_group, useNA = "ifany"))
+```
+
+
+```{r, results='hide', warning=FALSE}
+
+#Receptors that interact with NR-CAFs
+NRP1 <- c("NRP1", "VEGFA",
+          "SEMA3B", "SEMA3A", "SEMA3C", "PLXND1")
+
+nc_WNT <- c("WNT5A", "WNT11",
+            "FZD2", "FZD5", "FZD7",
+            "ROR1", "ROR2", "RYK")
+
+c_WNT <- c("WNT2", "WNT2B","WNT7A", "WNT3A", 
+           "WNT7B", "WNT9A", "WNT10A",
+           "FZD2", "FZD4", "FZD5", "FZD7", "FZD1", "FZD8", "LRP5", "LRP6")
+
+hedgehog <- c("SHH", "DHH", "IHH", "PTCH1", "PTCH2")
+
+NEGR1 <- c("FGFR2", "ADAM10", "NEGR1")
+
+
+library(RColorBrewer)
+Idents(PDAC_combined) <- "site"
+levels(PDAC_combined)
+
+PDAC_combined <- subset(PDAC_combined, idents = c("Panc"))
+levels(PDAC_combined)
+Idents(PDAC_combined) <- "Epi_NRCAF_group"
+levels(PDAC_combined)
+```
+
+
+# Line plots 
+```{r}
+# Get coordinates
+coords_Epi   <- coords_full[Epi_Spots,   c("imagerow", "imagecol")]
+coords_NRCAF <- coords_full[NRCAF_Spots, c("imagerow", "imagecol")]
+
+# For each Epi spot, find minimum distance to any NR-CAF
+library(FNN)
+dist_to_NRCAF <- FNN::get.knnx(
+  data  = as.matrix(coords_NRCAF),
+  query = as.matrix(coords_Epi),
+  k = 1
+)$nn.dist[, 1]
+
+# Convert to microns
+dist_to_NRCAF_um <- dist_to_NRCAF * microns_per_pixel
+
+# Store in a data frame
+epi_dist_df <- data.frame(
+  barcode  = Epi_Spots,
+  dist_um  = dist_to_NRCAF_um,
+  dist_sqrt = sqrt(dist_to_NRCAF_um),  # sqrt transform like the paper
+  row.names = Epi_Spots
+)
+
+sig_list <- list( NRP1,
+                  nc_WNT,
+                  NEGR1
+)
+
+PDAC_combined <- AddModuleScore(
+  PDAC_combined,
+  features = sig_list,
+  name     = "Sig"  # will create Sig1, Sig2, Sig3, Sig4
+)
+
+# STEP 2: Pull scores for Epi spots into the distance dataframe
+epi_dist_df$NRP1_Signaling <- PDAC_combined$Sig1[Epi_Spots]
+epi_dist_df$non_canonical_Wnt_Signaling     <- PDAC_combined$Sig2[Epi_Spots]
+epi_dist_df$NEGR1_Signaling     <- PDAC_combined$Sig3[Epi_Spots]
+
+# STEP 3: Reshape to long format
+library(tidyr)
+
+epi_long <- epi_dist_df %>%
+  pivot_longer(
+    cols      = c("NRP1_Signaling", "non_canonical_Wnt_Signaling", "NEGR1_Signaling"),
+    names_to  = "Signature",
+    values_to = "Score"
+  ) %>%
+  mutate(Signature = factor(Signature, 
+                            levels = c("NRP1_Signaling", "non_canonical_Wnt_Signaling", 
+                                    "NEGR1_Signaling" )))
+
+# STEP 4: Plot all 4 signatures
+ggplot(epi_long, aes(x = dist_sqrt, y = Score, color = Signature)) +
+  coord_cartesian(xlim = c(0, 4.5)) +
+  geom_smooth(
+    method    = "loess",
+    span      = 0.3,
+    se        = TRUE,
+    alpha     = 0.15,
+    linewidth = 1.2
+  ) +
+  scale_color_manual(values = c(
+    "NRP1_Signaling" = "#4A90C4",   # blue
+    "non_canonical_Wnt_Signaling"     = "#8B3A14",   # brown
+    "Hedgehog_Signaling"     = "#2E8B57",   # green
+    "NEGR1_Signaling"     = "#9B59B6" 
+  )) +
+  scale_fill_manual(values = c(
+    "NRP1_Signaling" = "#4A90C4",   # blue
+    "non_canonical_Wnt_Signaling"     = "#8B3A14",   # brown
+    "Hedgehog_Signaling"     = "#2E8B57",   # green
+    "NEGR1_Signaling"     = "#9B59B6" 
+  )) +
+  labs(
+    title    = "Epithelial Signature Scores vs. Distance from NR-CAFs",
+    subtitle = "Loess smoothing; shaded area = 95% CI",
+    x        = "Square Root (Radial Distance from NR-CAF, µm)",
+    y        = "Signature Score",
+    color    = "Signature"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title      = element_text(size = 12, face = "bold"),
+    plot.subtitle   = element_text(size = 10, color = "grey40"),
+    axis.title      = element_text(size = 11),
+    legend.position = "right",
+    legend.title    = element_text(size = 10, face = "bold"),
+    legend.text     = element_text(size = 9)
+  )
+
+```
+
+```{r}
+sig_list <- list( "NRP1",
+                  "VEGFA",
+                  "SEMA3A",
+                  "SEMA3B",
+                  "SEMA3C"
+)
+
+PDAC_combined <- AddModuleScore(
+  PDAC_combined,
+  features = sig_list,
+  name     = "NRP1_RECEPTORS"  # will create Sig1, Sig2, Sig3, Sig4
+)
+
+# STEP 2: Pull scores for Epi spots into the distance dataframe
+epi_dist_df$NRP1 <- PDAC_combined$NRP1_RECEPTORS1[Epi_Spots]
+epi_dist_df$VEGFA     <- PDAC_combined$NRP1_RECEPTORS2[Epi_Spots]
+epi_dist_df$SEMA3A <- PDAC_combined$NRP1_RECEPTORS3[Epi_Spots]
+epi_dist_df$SEMA3B     <- PDAC_combined$NRP1_RECEPTORS4[Epi_Spots]
+epi_dist_df$SEMA3C     <- PDAC_combined$NRP1_RECEPTORS5[Epi_Spots]
+
+
+# STEP 3: Reshape to long format
+library(tidyr)
+
+epi_long <- epi_dist_df %>%
+  pivot_longer(
+    cols      = c("NRP1",
+                  "VEGFA",
+                  "SEMA3A",
+                  "SEMA3B",
+                  "SEMA3C"),
+    names_to  = "Signature",
+    values_to = "Score"
+  ) %>%
+  mutate(Signature = factor(Signature, 
+                            levels = c("NRP1",
+                                       "VEGFA",
+                                       "SEMA3A",
+                                       "SEMA3B",
+                                       "SEMA3C")))
+
+# STEP 4: Plot all 4 signatures
+ggplot(epi_long, aes(x = dist_sqrt, y = Score, color = Signature)) +
+  geom_smooth(
+    method    = "loess",
+    span      = 0.3,
+    se        = TRUE,
+    alpha     = 0.15,
+    linewidth = 1.2
+  ) +
+  coord_cartesian(xlim = c(0, 4.5)) +
+  scale_color_manual(values = c(
+    "NRP1" = "#4A90C4",   # blue
+    "VEGFA"     = "#8B3A14",   # brown
+    "SEMA3A"     = "#9B59B6" ,
+    "SEMA3B" = "pink",
+    "SEMA3C" = "red"
+  )) +
+  scale_fill_manual(values = c(
+    "NRP1" = "#4A90C4",   # blue
+    "VEGFA"     = "#8B3A14",   # brown
+    "SEMA3A"     = "#9B59B6" ,
+    "SEMA3B" = "pink",
+    "SEMA3C" = "red"
+  )) +
+  labs(
+    title    = "Epithelial NRP1 Receptor Gene Expression Scores vs. Distance from NR-CAFs",
+    subtitle = "Loess smoothing; shaded area = 95% CI",
+    x        = "Square Root (Radial Distance from NR-CAF, µm)",
+    y        = "Signature Score",
+    color    = "Signature"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title      = element_text(size = 12, face = "bold"),
+    plot.subtitle   = element_text(size = 10, color = "grey40"),
+    axis.title      = element_text(size = 11),
+    legend.position = "right",
+    legend.title    = element_text(size = 10, face = "bold"),
+    legend.text     = element_text(size = 9)
+  )
+
+
+```
+

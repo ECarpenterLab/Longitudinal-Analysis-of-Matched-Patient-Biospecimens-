@@ -2,7 +2,7 @@
 
 This repository contains code used for single-cell RNA sequencing analysis performed in the paper:
 
-[Longitudinal analysis of matched patient biospecimens reveals Neural Reprogramming of Cancer-Associated Fibroblasts Following Chemotherapy in Pancreatic Cancer](https://www.biorxiv.org/content/10.64898/2025.12.01.691614v1.full)
+[Longitudinal Analysis of Matched Patient Biospecimens Reveals Neural Reprogramming of Cancer-Associated Fibroblasts Following Chemotherapy in Pancreatic Cancer]
 
 ---
 
@@ -21,9 +21,11 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
   Contains processed and annotated Seurat objects generated from:
   - [`/MARKDOWN/00_ambient_RNA_correction.rmd`](/MARKDOWN/00_ambient_RNA_correction.rmd)
   - [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
+  - [`/MARKDOWN/03_Merging_PT1475_Recurrence_Timepoint.Rmd`](/MARKDOWN/03_Merging_PT1475_Recurrence_Timepoint.Rmd)
 
   Newly generated objects from MARKDOWN `#00` should be saved here.
-  Seurat object with cellular deconvolution annoations for the spatial transcriptomics analysis was aquired from DOI: 10.1038/s41586-025-08927-x.
+  Seurat object for the spatial transcriptomics analysis was acquired from DOI: 10.1038/s41586-025-08927-x.
+  Seurat object of healthy donor pancreata samples were acquired from DOI: 10.1158/2159-8290.CD-23-0013.
 
 - **`Utils/`**  
   Contains utility functions used across scripts for modular and reproducible analysis.
@@ -51,7 +53,7 @@ as implemented in:
 
 ### Cluster Annotation
 
-Longitudinal clusters were labeled and subset using previously published markers:
+Longitudinal clusters were labeled and subset using markers published in literature:
 
 - [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
 

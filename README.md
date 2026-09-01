@@ -13,6 +13,7 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
 - **`DATA/`**  
   Contains low-size input data, annotations, and the `samples_info` spreadsheet for scRNA-seq analysis.  
   Large data files must be downloaded as described in `Data_Acquisition` prior to running scripts.
+  Update the file path in the samples_info sheet to match the path from your working directory.
 
 - **`MARKDOWN/`**  
   Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory. 

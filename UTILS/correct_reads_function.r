@@ -28,7 +28,7 @@ correct_reads <- function(data_dir, rho = NULL , extra = NULL, cap = FALSE){
   sc = load10X(data_dir, verbose = F)
   
   # Creating seurat clusters
-  seurat_obj <- Read10X(paste0(data_dir,"/filtered_feature_bc_matrix/"))
+  seurat_obj <- Read10X_h5(paste0(data_dir,"/filtered_feature_bc_matrix/"))
   seurat_obj <- CreateSeuratObject(seurat_obj)
   seurat_obj <- FindVariableFeatures(seurat_obj, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
   seurat_obj <- NormalizeData(seurat_obj, verbose = FALSE)

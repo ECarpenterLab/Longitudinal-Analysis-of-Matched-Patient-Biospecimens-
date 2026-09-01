@@ -27,8 +27,8 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
   - [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
     
   Newly generated objects from MARKDOWN `#00` should be saved in this sub-directory.
-  Seurat object for the spatial transcriptomics analysis was acquired from DOI: 10.1038/s41586-025-08927-x.
-  Seurat object of healthy donor pancreata samples were acquired from DOI: 10.1158/2159-8290.CD-23-0013.
+  Seurat object for the spatial transcriptomics analysis was acquired from [DOI: 10.1038/s41586-025-08927-x](https://www.nature.com/articles/s41586-025-08927-x).
+  Seurat object of healthy donor pancreata samples were acquired from [DOI: 10.1158/2159-8290.CD-23-0013](https://aacrjournals.org/cancerdiscovery/article/13/6/1324/726992/Analysis-of-Donor-Pancreata-Defines-the).
 
 - **`Utils/`**  
   Contains utility functions used across scripts for modular and reproducible analysis.

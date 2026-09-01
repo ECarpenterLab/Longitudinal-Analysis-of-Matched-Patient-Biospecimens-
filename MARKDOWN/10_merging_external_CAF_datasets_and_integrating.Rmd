@@ -1,5 +1,5 @@
 ---
-title: "11_Merging Longitudinal with Published Dataset"
+title: "10_Merging Longitudinal with Published Dataset"
 author: "Aylin Henstridge (Aylinhen@umich.edu)"
 date: "2026-02-11"
 output: 
@@ -113,7 +113,6 @@ samples.list <- lapply(X = samples.list, FUN = function(x) {
   x <- RunPCA(x, features = features, verbose = FALSE)
 })
 
-
 #This step can take hours to run and complete.
 anchors <- FindIntegrationAnchors(object.list = samples.list, anchor.features = features, reduction = "rpca",assay = rep("CorrectedCounts", length(samples.list)))
 
@@ -139,29 +138,18 @@ Integrated_Dataset[["UMAP_Clusters"]] <- Idents(object = Integrated_Dataset)
 # Clean up dataset and name clusters
 ```{r, message=FALSE, warning=FALSE}
 Integrated_Dataset <- readRDS("../OBJECTS/integrated_merged_datasets_longitduinal_hg38_GOL.rds")
-Idents(Integrated_Dataset) <- 'sample_id'
-levels(Integrated_Dataset)
-p1 <- DimPlot(Integrated_Dataset,  reduction = "integrated_umap",  group.by = c("sample_id"),) + NoLegend()
-p2 <- DimPlot(Integrated_Dataset,  reduction = "unintegrated_umap",  group.by = c("sample_id"))
-p1+p2
-```
-
-```{r, message=FALSE, warning=FALSE}
-Idents(Integrated_Dataset) <- "Level1Labels"
-levels(Integrated_Dataset)
-p1 <- DimPlot(Integrated_Dataset,  reduction = "integrated_umap",  group.by = c("Level1Labels")) + NoLegend()  
-p2 <- DimPlot(Integrated_Dataset,  reduction = "unintegrated_umap",  group.by = c("Level1Labels"))
-p1+p2
 ```
 
 ```{r, message=FALSE, warning=FALSE}
 Idents(Integrated_Dataset) <- "UMAP_Clusters"
-DimPlot(Integrated_Dataset, reduction = "integrated_umap", label = TRUE)
 markers <- FindAllMarkers(Integrated_Dataset, assay = "CorrectedCounts", min.pct = 0.25, only.pos = T) 
 datatable((markers), filter = 'top', caption = "Seurat Cluster Markers", options = list(scrollX = T))
 ```
 
 ## TO NAME CLUSTERS:
+
+Here we alreayd have annotations from when they were analyzed seperately. So we simply clean up the labels and correct for duplicates. 
+i.e. CD4T and CD4 being seperate clusters!
 ```{r, message=FALSE, warning=FALSE}
 Idents(object = Integrated_Dataset) <- 'Level1Labels'
 levels(Integrated_Dataset)
@@ -527,11 +515,15 @@ fibro <- FIBROS
 
 
 # Differential Expression and Pathway Analysis
-```{r, message=FALSE, warning=FALSE}
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
 Idents(fibro) <- "passed_level1labels"
 levels(fibro)
 
 agf.markers <- FindMarkers(fibro, ident.1 = "agCAF", ident.2 = "CAF", assay = "RNA", test.use = "MAST", verbose = FALSE, recorrect_umi = FALSE, logfc.threshold = 0)
+```
+
+```{r, echo=FALSE}
+agf.markers <- read.csv("../DATA/Differential_Gene_Expression_NR_CAFS_largedata.csv")
 ```
 
 # EnrichKegg()
@@ -545,8 +537,8 @@ up_in_t1 <- agf.markers %>%
 down_in_t1 <- agf.markers %>%
   filter(avg_log2FC < 0)
 
-up_ids <- bitr(up_in_t1$gene, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
-down_ids <- bitr(down_in_t1$gene, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
+up_ids <- bitr(up_in_t1$X, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
+down_ids <- bitr(down_in_t1$X, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
 
 up_kegg <- enrichKEGG(gene=up_ids$ENTREZID, organism="hsa", pvalueCutoff=0.05)
 down_kegg <- enrichKEGG(gene=down_ids$ENTREZID, organism="hsa", pvalueCutoff=0.05)
@@ -570,7 +562,7 @@ to_numeric_ratio <- function(x) {
 combined_df <- bind_rows(up_df_new, down_df_new) %>%
   filter(!is.infinite(enrichment_score)) %>%
   arrange(desc(abs(enrichment_score))) %>%
-  slice_head(n=50)  %>% mutate(GeneRatioNum = to_numeric_ratio(GeneRatio)) # add numeric GeneRatio
+  head(n=50)  %>% mutate(GeneRatioNum = to_numeric_ratio(GeneRatio)) # add numeric GeneRatio
 ```
 
 ```{r, message=FALSE, warning=FALSE}

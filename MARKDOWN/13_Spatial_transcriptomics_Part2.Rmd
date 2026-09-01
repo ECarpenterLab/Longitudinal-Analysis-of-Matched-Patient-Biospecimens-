@@ -1,0 +1,516 @@
+---
+title: "13_Spatial_Transcriptomics_Part_2"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-06-24"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+```{r, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages({
+library(Seurat)
+library(SeuratObject)
+library(SeuratWrappers)
+library(AUCell)
+library(monocle3)
+library(GSVA)
+library(pheatmap)
+library(tidyverse)
+library(RColorBrewer)
+library(DT)
+library(dplyr)
+`%nin%` <- Negate(`%in%`)
+getPalette <- colorRampPalette(brewer.pal(9, 'Set1'))
+source("../UTILS/pseudobulk_functions.R")
+})
+```
+
+# Open Spatial Object (Pei et al, 2025, Nature)
+```{r}
+PDAC_combined <- readRDS("../OBJECTS/PDAC_combined_cytospace_deconvolution.rds") #read in deconvoluted object
+#object was shared with us from published data  from DOI: 10.1038/s41586-025-08927-x
+```
+
+## Subset cell types of interest from the deconvoluted object
+We want to subset out CAFs and epithelial cells from the object.
+
+```{r, results='hide', warning=FALSE}
+PDAC_combined$celltype_cytospace <- ifelse(PDAC_combined$CAFS >= 0.5, "CAF",
+                                 ifelse(PDAC_combined$Epicells >= 0.5, "Epi", "Other"))
+
+Idents(PDAC_combined) <- "celltype_cytospace"
+levels(PDAC_combined) #We now have new metadata that says we have CAFs and EPi cells
+table(PDAC_combined$celltype_cytospace) #and it looks like we have 13376 CAFs and 3196 epithelial cells 
+
+caf_epi_cytospace <- subset(PDAC_combined, idents = c("CAF", "Epi"))
+```
+
+```{r, echo=FALSE}
+DimPlot(object =PDAC_combined, reduction = "umap", pt.size = 0.05, raster = F, label = T, repel = T, cols = getPalette(length(levels(PDAC_combined)))) 
+DimPlot(object =caf_epi_cytospace, reduction = "umap", pt.size = 0.05, raster = F, label = T, repel = T, cols = getPalette(length(levels(PDAC_combined)))) 
+```
+
+### SUBSET CAFS
+
+We will update CAF metadata and then map agCAF gene expression in the different sites. 
+
+```{r, results='hide', warning=FALSE}
+CAFs <- subset(caf_epi_cytospace, idents = c("CAF"))
+DimPlot(object =CAFs, reduction = "umap", pt.size = 0.05, raster = F, label = T, repel = T, cols = getPalette(length(levels(PDAC_combined)))) 
+
+DefaultAssay(CAFs) <- "Spatial" 
+CAFs$site[CAFs$site == "PC"] <- "Peritoneal Metastases"
+CAFs$site[CAFs$site == "Lung"] <- "Lung Metastases"
+CAFs$site[CAFs$site == "Liver"] <- "Liver Metastases"
+CAFs$site[CAFs$site == "Panc"] <- "Primary Tumor"
+
+
+genes <- c("PDGFRA", "NEGR1", "SLIT2", "ROBO1", 
+           "SEMA3A", "NRP1", "NFIA",
+           "EPHA3", "FAP",
+           "ACTA2", "CXCL12")
+Idents(CAFs) <- "site"
+```
+
+```{r, echo=FALSE}
+DotPlot(
+  object = CAFs,
+  features = genes,
+  scale = TRUE
+) +
+  scale_color_gradientn(
+    colours = rev(brewer.pal(11, "RdYlBu"))
+  ) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, size = 10, hjust = 1)
+  )
+```
+
+#### AUCELL ANALYSIS ON CAFs USING KNOWN GENE SIGNATURES
+```{r, results='hide', warning=FALSE}
+##AUCELL ANALYSIS ON CAFsBLASTS USING KNOWN GENE SIGNATURES
+library(readxl)
+mycaf_icaf <- read_excel("../GENE_SIGNATURES/MYCAF_ICAF.xlsx")
+mycaf <- mycaf_icaf$mycaf
+icaf <- mycaf_icaf$icaf
+apcaf <- mycaf_icaf$apcaf
+
+###___________________________________________________
+agf_signature <- c("NEGR1", "SLIT2", "ROBO1", "EPHA3","NRP1", "NFIA", 'SEMA3A')
+
+sigantures <- list(
+  mycaf = mycaf,
+  icaf = icaf,
+  apcaf = apcaf,
+  agf_signature = agf_signature
+)
+expr <- GetAssayData(CAFs,
+                     assay = "Spatial",
+                     layer = "counts")
+geneRanking <- AUCell_buildRankings(expr, nCores = 36, splitByBlocks = TRUE)
+auc_score_2 <- AUCell_calcAUC(rankings = geneRanking, geneSets = sigantures, aucMaxRank = nrow(geneRanking)*0.1)
+
+#do not scale aucel score for this so it stays comparable across different groups 
+#make a data frame with ALL of the different types of auc scoring generated with different gene sets
+auc_score_2 <- as.data.frame(t(assay(c(auc_score_2))))
+auc_score_scaled_2 <- as.data.frame(auc_score_2)
+#add it as metadata
+CAFs <- AddMetaData(CAFs, metadata = auc_score_scaled_2)
+```
+
+```{r}
+FeaturePlot(CAFs, features = c("mycaf", "icaf", "agf_signature"), pt.size =1, label = FALSE, repel = TRUE, order = TRUE) & 
+  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdYlBu")))
+```
+
+```{r, warning=FALSE}
+# 1. Define what threshold for  "top expressors" of each score
+agf_threshold <- quantile(CAFs$agf_signature)  # top 25% (neural caf signature)
+agf_threshold
+
+mycaf_thresh <- quantile(CAFs$mycaf)  # top 25%
+mycaf_thresh
+
+icaf_thresh <- quantile(CAFs$icaf)  # top 25%
+icaf_thresh
+
+library(dplyr)
+#Now we will define neural CAFs,myCAfs, iCAFs, and indeterminate or hybrid CAF types  
+CAFs$double_positives <- case_when(
+  CAFs$myCAF <  0.53 & CAFs$agf_signature >= 0.059 & CAFs$icaf >= 0.13  ~ "agf_icaf",
+  CAFs$myCAF >= 0.53 & CAFs$agf_signature <  0.059 & CAFs$icaf <  0.13  ~ "mycaf",
+  CAFs$myCAF <  0.53 & CAFs$agf_signature >= 0.059 & CAFs$icaf <  0.13  ~ "agf",
+  CAFs$myCAF <  0.53 & CAFs$agf_signature <  0.059 & CAFs$icaf >= 0.13  ~ "icaf",
+  TRUE ~ "undefined_caf"
+)
+
+table(CAFs$double_positives, useNA = "ifany")
+
+PDAC_combined$double_positives <- "Other Cells"
+PDAC_combined$double_positives <- CAFs$double_positives
+
+PDAC_combined$double_positives <- ifelse( PDAC_combined$celltype_cytospace == "Epi",
+  "Epi",
+  PDAC_combined$double_positives
+)
+
+table(PDAC_combined$double_positives)
+
+Idents(PDAC_combined) <- "double_positives"
+PDAC_combined_CAFs_Epi <- subset(PDAC_combined, idents = c("agf", "agf_icaf", "Epi", "icaf", "mycaf", "undefined_caf"))
+```
+
+```{r}
+SpatialDimPlot(PDAC_combined_CAFs_Epi, 
+               images = "slice1",
+               group.by = "double_positives", 
+               pt.size.factor = 3000,
+               cols = c("agf" = 'red', icaf = 'blue', 'mycaf' = 'green', 
+                        'undefined_caf' = 'orange','Epi' = 'purple',
+                        'agf_icaf' = 'lightblue'),
+               alpha = c(1, 1))
+```
+
+```{r}
+#saveRDS(PDAC_combined_CAFs_Epi, "../Revisions/spatial/subsetted_CAFs_lenient.RDS")
+
+
+img <- PDAC_combined@images[[1]]
+spot_px <- img@scale.factors$spot * ncol(img@image)  # spot diameter in pixels
+microns_per_pixel <- 55 / spot_px                          # µm per pixel
+
+cat(sprintf("Spot diameter:      %.1f pixels = 55 µm\n", spot_px))
+cat(sprintf("Scale:              %.3f µm per pixel\n",   microns_per_pixel))
+cat(sprintf("                    %.3f pixels per µm\n",  1 / microns_per_pixel))
+
+```
+
+##  Spatial feature plots of CAF signature scores
+
+```{r}
+# Push AUCell scores from CAFs into PDAC_combined by barcode
+auc_cols <- c("mycaf", "icaf", "agf_signature")
+
+for (col in auc_cols) {
+  score_vec <- setNames(CAFs@meta.data[[col]], colnames(CAFs))
+  PDAC_combined[[col]] <- unname(score_vec[match(colnames(PDAC_combined), names(score_vec))])
+}
+
+# sanity check -- should all equal ncol(CAFs)
+print(sapply(auc_cols, function(col) sum(!is.na(PDAC_combined[[col]]))))
+print(ncol(CAFs))
+
+#now lets look at each tissue site
+#now look only at primary tumor 
+Idents(PDAC_combined) <- "site"
+levels(PDAC_combined)
+PT <- subset(PDAC_combined, idents = c("Panc"))
+liver <- subset(PDAC_combined, idents = c("Liver"))
+peritoneal <- subset(PDAC_combined, idents = c("PC"))
+```
+
+
+
+### CAF Signature Score vs. Distance from Epi -- ALL 4 signatures, by site
+
+```{r}
+library(FNN)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+
+# ------------------------------------------------------------------
+# Reusable function: distance-to-Epi + AUCell scores for any object
+# ------------------------------------------------------------------
+
+get_caf_dist_sig_df <- function(obj) {
+  
+  coords_list <- lapply(Images(obj), function(img) {
+    df <- GetTissueCoordinates(obj, image = img)
+    if (nrow(df) == 0) return(NULL)
+    df$image <- img
+    df
+  })
+  coords_list <- coords_list[!sapply(coords_list, is.null)]
+  if (length(coords_list) == 0) return(NULL)
+  coords_full <- do.call(rbind, coords_list)
+  
+  dist_list <- list()
+  
+  for (img_name in unique(coords_full$image)) {
+    
+    cells_in_sample <- rownames(coords_full)[coords_full$image == img_name]
+    meta_s <- obj@meta.data[cells_in_sample, , drop = FALSE]
+    
+    epi_cells <- cells_in_sample[which(meta_s$celltype_cytospace == "Epi")]
+    caf_cells <- cells_in_sample[which(!is.na(meta_s$mycaf))]
+    
+    if (length(epi_cells) < 3 || length(caf_cells) < 3) next
+    
+    img_obj   <- obj@images[[img_name]]
+    spot_px   <- img_obj@scale.factors$spot * ncol(img_obj@image)
+    um_per_px <- 55 / spot_px
+    
+    d <- FNN::get.knnx(
+      data  = as.matrix(coords_full[epi_cells, c("imagerow", "imagecol")]),
+      query = as.matrix(coords_full[caf_cells, c("imagerow", "imagecol")]),
+      k = 1
+    )$nn.dist[, 1]
+    
+    dist_list[[img_name]] <- data.frame(
+      barcode  = caf_cells,
+      dist_um  = d * um_per_px,
+      image    = img_name
+    )
+  }
+  
+  caf_dist_df <- bind_rows(dist_list)
+  if (nrow(caf_dist_df) == 0) return(NULL)
+  
+  caf_dist_df$dist_sqrt <- sqrt(caf_dist_df$dist_um)
+  
+  auc_scores <- obj@meta.data[, auc_cols]
+  auc_scores$barcode <- rownames(auc_scores)
+  
+  caf_dist_df %>% left_join(auc_scores, by = "barcode")
+}
+
+# ------------------------------------------------------------------
+# Reusable plotting function -- ALL 4 signatures
+# ------------------------------------------------------------------
+
+sig_labels <- c(
+  "mycaf"         = "myCAF Score",
+  "icaf"          = "iCAF Score",
+  "agf_signature" = "Neural CAF Score"
+)
+
+sig_pal <- c(
+  "myCAF Score"      = "#A65628",
+  "iCAF Score"       = "#54B0E4",
+  "Neural CAF Score" = "#2DAF5A",
+  "border"           = "grey50"
+)
+
+make_sig_trend_plot <- function(caf_dist_sig_df, title_label) {
+  
+  d <- caf_dist_sig_df %>%
+    filter(dist_sqrt > 0) %>%
+    select(dist_sqrt, mycaf, icaf, agf_signature) %>%
+    pivot_longer(
+      cols      = c("mycaf", "icaf", "agf_signature"),
+      names_to  = "Signature",
+      values_to = "Score"
+    ) %>%
+    mutate(Signature = recode(Signature, !!!sig_labels),
+           Signature = factor(Signature, levels = c("myCAF Score", "iCAF Score",
+                                                 "Neural CAF Score")))
+  
+  ggplot(d, aes(dist_sqrt, Score, color = Signature)) +
+    geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), linewidth = 2) +
+    geom_vline(aes(xintercept = 0, color = "border"), linetype = "dashed") +
+    xlab("sqrt(Radial Distance from Epi)") +
+    ylab("CAF Signature Score") +
+    ggtitle(title_label) +
+    scale_color_manual(values = sig_pal) +
+    theme_bw()
+}
+
+# ------------------------------------------------------------------
+# Run on your existing PT / liver / peritoneal objects
+# ------------------------------------------------------------------
+
+dist_PT         <- get_caf_dist_sig_df(PT)
+dist_liver      <- get_caf_dist_sig_df(liver)
+dist_peritoneal <- get_caf_dist_sig_df(peritoneal)
+
+site_dist_dfs <- list(
+  "Primary Tumor"   = dist_PT,
+  "Liver Mets"      = dist_liver,
+  "Peritoneal Mets" = dist_peritoneal
+)
+site_dist_dfs <- site_dist_dfs[!sapply(site_dist_dfs, is.null)]
+
+site_plots <- lapply(names(site_dist_dfs), function(s) {
+  make_sig_trend_plot(site_dist_dfs[[s]], title_label = s)
+})
+
+wrap_plots(site_plots, nrow = 1) +
+  plot_layout(guides = "collect")
+
+ggsave("caf_all4_sig_trends_by_site_scaled_leneint.pdf", width = 6 * length(site_plots), height = 5, dpi = 1200)
+dev.off()
+
+#a shared y axis to comapre all three tissue sites
+# ------------------------------------------------------------------
+# Compute a shared y-axis range across all sites/signatures
+# ------------------------------------------------------------------
+
+all_scores <- bind_rows(site_dist_dfs) %>%
+  select(mycaf, icaf, agf_signature) %>%
+  pivot_longer(everything(), values_to = "Score") %>%
+  pull(Score)
+
+y_range <- range(all_scores, na.rm = TRUE)
+y_range   # sanity check
+
+# ------------------------------------------------------------------
+# Updated plotting function -- takes a shared ylim
+# ------------------------------------------------------------------
+
+make_sig_trend_plot <- function(caf_dist_sig_df, title_label, ylim = NULL) {
+  
+  d <- caf_dist_sig_df %>%
+    filter(dist_sqrt > 0) %>%
+    select(dist_sqrt, mycaf, icaf, agf_signature) %>%
+    pivot_longer(
+      cols      = c("mycaf", "icaf", "agf_signature"),
+      names_to  = "Signature",
+      values_to = "Score"
+    ) %>%
+    mutate(Signature = recode(Signature, !!!sig_labels),
+           Signature = factor(Signature, levels = c("myCAF Score", "iCAF Score",
+                                                    "apCAF Score", "Neural CAF Score")))
+  
+  p <- ggplot(d, aes(dist_sqrt, Score, color = Signature)) +
+    geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), linewidth = 2) +
+    geom_vline(aes(xintercept = 0, color = "border"), linetype = "dashed") +
+    xlab("sqrt(Radial Distance from Epi)") +
+    ylab("CAF Signature Score") +
+    ggtitle(title_label) +
+    scale_color_manual(values = sig_pal) +
+    theme_bw() 
+  
+  if (!is.null(ylim)) {
+    p <- p + coord_cartesian(ylim = ylim)
+  }
+  
+  p
+}
+
+# ------------------------------------------------------------------
+# Rebuild plots with the shared y-axis applied
+# ------------------------------------------------------------------
+
+site_plots <- lapply(names(site_dist_dfs), function(s) {
+  make_sig_trend_plot(site_dist_dfs[[s]], title_label = s, ylim = c(-1, 2))
+})
+
+wrap_plots(site_plots, nrow = 1) +
+  plot_layout(guides = "collect")
+
+ggsave("caf_all4_sig_trends_by_site_shared_y_lenient.pdf", width = 6 * length(site_plots), height = 5, dpi = 1200)
+dev.off()
+
+
+##############################################################################
+# Spatial feature plots: each CAF signature score over H&E, with Epi (Tumor)
+# highlighted in bright green
+##############################################################################
+
+library(ggplot2)
+library(ggnewscale)
+
+##############################################################################
+# Spatial DimPlot: double_positives categories, all image slices
+##############################################################################
+
+Idents(PDAC_combined) <- "double_positives"
+
+PDAC_combined_CAFs_Epi <- subset(
+  PDAC_combined,
+  idents = c("agf", "agf_icaf", "Epi", "icaf", "mycaf", "undefined_caf")
+)
+
+double_pos_colors <- c(
+  "agf"           = "red",
+  "icaf"          = "blue",
+  "mycaf"         = "green",
+  "undefined_caf" = "orange",
+  "Epi"           = "purple",
+  "agf_icaf"      = "lightblue"
+)
+```
+
+```{r}
+# ------------------------------------------------------------------
+# Single image check
+# ------------------------------------------------------------------
+
+SpatialDimPlot(PDAC_combined_CAFs_Epi, 
+               images = "slice1.2.13",
+               group.by = "double_positives", 
+               pt.size.factor = 3000,
+               cols = double_pos_colors,
+               alpha = c(1, 1))
+```
+
+```{r}
+# ------------------------------------------------------------------
+# All images, one multi-page PDF
+# ------------------------------------------------------------------
+
+pdf("double_positives_spatial_all_images.pdf", width = 6, height = 6)
+for (img in Images(PDAC_combined_CAFs_Epi)) {
+  print(
+    SpatialDimPlot(PDAC_combined_CAFs_Epi, 
+                   images = img,
+                   group.by = "double_positives", 
+                   pt.size.factor = 3000,
+                   cols = double_pos_colors,
+                   alpha = c(1, 1)) +
+      ggtitle(img)
+  )
+}
+dev.off()
+
+
+
+for (img in Images(PDAC_combined)) {
+  cells_in_img <- rownames(GetTissueCoordinates(PDAC_combined, image = img))
+  site_here <- unique(PDAC_combined$site[cells_in_img])
+  cat(img, "->", paste(site_here, collapse = ", "), "\n")
+}
+for (img in Images(PDAC_combined)) {
+  cells_in_img <- rownames(GetTissueCoordinates(PDAC_combined, image = img))
+  site_here <- unique(PDAC_combined$treatment[cells_in_img])
+  cat(img, "->", paste(site_here, collapse = ", "), "\n")
+}
+```

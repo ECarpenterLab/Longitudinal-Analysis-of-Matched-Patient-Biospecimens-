@@ -15,10 +15,11 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
   Large data files must be downloaded as described in `Data_Acquisition` prior to running scripts.
 
 - **`MARKDOWN/`**  
-  Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
-
+  Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory. 
 - **`OBJECTS/`**  
-  Contains processed and annotated Seurat objects generated from:
+  The seurat object and filtered matrices to be downloaded into this can be found at the NIH Gene   Expression Omnibus database GSE345774.
+
+The processed and annotated Seurat objects generated from the below scripts should be saved into this folder:
   - [`/MARKDOWN/00_ambient_RNA_correction.rmd`](/MARKDOWN/00_ambient_RNA_correction.rmd)
   - [`/MARKDOWN/01_Generating_Merged_Object.Rmd`](/MARKDOWN/01_Generating_Merged_Object.Rmd)
   - [`/MARKDOWN/03_Merging_PT1475_Recurrence_Timepoint.Rmd`](/MARKDOWN/03_Merging_PT1475_Recurrence_Timepoint.Rmd)

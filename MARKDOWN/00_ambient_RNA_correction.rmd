@@ -51,7 +51,7 @@ library(parallel)
 library(tidyverse)
 library(ggplot2)
 library(magrittr)
-source("../UTILS/correct_reads_function.r")
+source("../UTILS/correct_reads_function_h5_files.r")
 
 #setwd("/nfs/turbo/umms-eicarpen/Henstridge_Longitudinal_Cancer_Discovery/SCRIPTS")
 #or can use soruce file location if file is saved in appropriate spot
@@ -59,7 +59,7 @@ source("../UTILS/correct_reads_function.r")
 ##                        loading files                        ##
 #################################################################
 
-samples_info <- readxl::read_xlsx("../UTILS/sample_info_Eileen_new.xlsx")
+samples_info <- readxl::read_xlsx("../UTILS/samples_info_cellranger_test.xlsx")
 ```
 
 ## Ambient RNA Correction 

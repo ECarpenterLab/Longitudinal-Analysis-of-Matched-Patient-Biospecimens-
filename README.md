@@ -133,7 +133,7 @@ Epithelial cell characterization for Patient 1475:
 
 # Bulk Cell RNA Sequencing Repository Overview
 
-This repository contains code used for bulk RNA sequencing analysis performed in the paper. The processed expected gene counts and featureCounts output files required for this analysis can be found on Gene Expression Omnibus... and the raw unprocessed files will be at dbgap accession number...
+This repository contains code used for bulk RNA sequencing analysis performed in the paper. The processed expected gene counts and featureCounts output files, as well as necessary metadata information and gene_info.csv, required for this analysis can be found on Gene Expression Omnibus at GSE346894 and the raw unprocessed files will be available at dbgap accession number phs004909.v1.p1. 
 
 The count matrixes, metadata files, and gene_info.csv will all need to be downloaded into the appropriate directories for the following code. 
 

@@ -1,0 +1,543 @@
+---
+title: "15_CAFs_bulkRNA_Sequencing"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-06-24"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+```{r, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages({
+library(ggplot2)
+library(pheatmap)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(PCAtools)
+library(DESeq2)
+})
+
+
+#Used the Plsmidasaurus proved BAM files to generate a counts matrix we read in.
+count_matrix <- read.table("../bulk_RNA/geo_upload_files/filtered_count_matrix_CAF_samples.txt", header = TRUE, sep = "\t")
+
+gene_info <- read.csv("gene_info.csv") #read this in, downloaded in utils folder
+# Take a look at the structure
+head(count_matrix)
+dim(count_matrix)
+colnames(count_matrix)
+
+```
+
+# DESeq2 Analyss
+```{r, message=FALSE, warning=FALSE}
+# ── Build sample metadata ──────────────────────────────────
+metadata <- data.frame(
+  sample    = paste0("Sample_", sprintf("%02d", 1:18)),
+  cell_line = factor(c(rep("2562", 6),
+                       rep("2586", 6),
+                       rep("1478", 6))),
+  treatment = factor(c("Treatment_Naive", "Treatment_Naive", "Treatment_Naive",
+                       "Gemcitabine",     "Gemcitabine",     "Gemcitabine",
+                       "Treatment_Naive", "Treatment_Naive", "Treatment_Naive",
+                       "Gemcitabine",     "Gemcitabine",     "Gemcitabine",
+                       "Treatment_Naive", "Treatment_Naive", "Treatment_Naive",
+                       "Gemcitabine",     "Gemcitabine",     "Gemcitabine"),
+                     levels = c("Treatment_Naive", "Gemcitabine")),
+  replicate = factor(c(1,2,3, 1,2,3,
+                       1,2,3, 1,2,3,
+                       1,2,3, 1,2,3)),
+  replicate_id = factor(c(rep("2562_TN", 3),
+                          rep("2562_Gem", 3),
+                          rep("2586_TN", 3),
+                          rep("2586_Gem", 3),
+                          rep("1478_TN", 3),
+                          rep("1478_Gem", 3))),
+  row.names = paste0("Sample_", sprintf("%02d", 1:18))
+)
+
+# Verify metadata looks correct
+print(metadata)
+
+#write.csv(metadata, "CAFs_gemcitabine_metadata.csv")
+
+# ── 6. Verify matrix and metadata match ──────────────────────
+all(colnames(count_matrix) == rownames(metadata))  # must be TRUE
+
+# ── 7. Build DESeqDataSet ─────────────────────────────────────
+# Design: test treatment effect accounting for cell line
+dds <- DESeqDataSetFromMatrix(
+  countData = round(count_matrix),   # round because of fractional multimappers
+  colData   = metadata,
+  design    = ~ cell_line + treatment
+)
+
+vst <- assay(vst(dds))
+rv <- rowVars(vst)
+select <- order(rv, decreasing=TRUE)[seq_len(min(500, length(dds)))]
+pca <- pca(vst[select,], metadata = colData(dds))
+biplot(pca,
+       showLoadings = F,
+       boxedLoadingsNames = T,
+       colby = 'treatment',
+       shape = 'cell_line',
+       labSize = 0, pointSize = 5, 
+       legendPosition = 'right',
+       legendLabSize = 7, legendIconSize = 4, legendTitleSize = 10)
+
+biplot(pca,
+       showLoadings = F,
+       boxedLoadingsNames = T,
+       colby = 'cell_line',
+       shape = 'replicate',
+       labSize = 0, pointSize = 5,
+       legendPosition = 'right',
+       legendLabSize = 7, legendIconSize = 4, legendTitleSize = 10)
+
+#Here we collpase the technical replicates of each sample so we can look at the average values of each. 
+dds_full <- dds
+dds <- collapseReplicates(dds, dds$replicate_id)
+vst_full <- assay(vst(dds_full))
+vst <- assay(vst(dds))
+rv <- rowVars(vst)
+rv_full <- rowVars(vst_full)
+select <- order(rv, decreasing=TRUE)[seq_len(min(500, length(dds)))]
+select_full <- order(rv_full, decreasing=TRUE)[seq_len(min(500, length(dds)))]
+pca <- pca(vst[select,], metadata = colData(dds))
+biplot(pca,
+       showLoadings = F,
+       boxedLoadingsNames = T,
+       colby = 'cell_line',
+       shape = 'treatment',
+       labSize = 0, pointSize = 5, 
+       legendPosition = 'right',
+       legendLabSize = 7, legendIconSize = 4, legendTitleSize = 10)
+
+pca <- pca(vst_full[select_full,], metadata = colData(dds_full))
+biplot(pca,
+       showLoadings = F,
+       boxedLoadingsNames = T,
+       colby = 'cell_line',
+       shape = 'treatment',
+       labSize = 0, pointSize = 5, 
+       legendPosition = 'right',
+       legendLabSize = 7, legendIconSize = 4, legendTitleSize = 10)
+
+###PHEATMAP of  associated genes
+neural <- c("NEGR1","EPHA3", "SLIT2", "ROBO1", 
+            "SEMA3A", "NRP1", "NFIA")
+wnt <- c("WNT5A", "WNT11",
+         "FZD7", "FZD5", "ROR1", "ROR2", "RYK",
+         "SFRP1", "MYC", "PRICKLE1", "FZD7", 
+         "PLCB4", "LRP6" )
+
+myCAF_genes <- c("ACTA2", "TAGLN", "MMP11", "MYL9", "TPM1", "TPM2",
+                 "POSTN", "COL1A1", "COL1A2", "COL3A1",
+                 "HOPX", "VIM")
+
+iCAF_genes <- c("IL6", "IL8", "CXCL1", "CXCL2", "CXCL12",
+                "LIF", "CCL2", "HAS1", "HAS2", "PDGFRA",
+                "CFD", "DPT", "LMNA", "PRRX1", "LY6C1")
+
+all <- c("NEGR1","EPHA3", "SLIT2", "ROBO1", 
+            "SEMA3A", "NRP1", "NFIA", "ACTA2", "TAGLN", "MMP11", "MYL9", "TPM1", "TPM2",
+                 "POSTN", "COL1A1", "COL1A2", "COL3A1",
+                 "HOPX", "VIM","IL6", "IL8", "CXCL1", "CXCL2", "CXCL12",
+                "LIF", "CCL2", "HAS1", "HAS2", "PDGFRA",
+                "CFD", "DPT", "LMNA", "PRRX1", "LY6C1")
+
+map_genes <- function(genes) {
+  gm <- gene_info[gene_info$gene_name %in% genes, c("Geneid", "gene_name")]
+  gm <- gm[!duplicated(gm$gene_name), ]
+  cat("Found:", gm$gene_name, "\n")
+  cat("Missing:", setdiff(genes, gm$gene_name), "\n")
+  gm
+}
+gene_map_neural <- map_genes(neural)
+wnt_map <- map_genes(wnt)
+gene_map_mycaf <- map_genes(myCAF_genes)
+icaf_map <- map_genes(iCAF_genes)
+all_map <- map_genes(all)
+
+neural_matrix   <- vst[gene_map_neural$Geneid, ]
+rownames(neural_matrix) <- gene_map_neural$gene_name
+wnt_matrix <- vst[wnt_map$Geneid, ]
+rownames(wnt_matrix) <- wnt_map$gene_name
+
+mycaf_matrix   <- vst[gene_map_mycaf$Geneid, ]
+rownames(mycaf_matrix) <- gene_map_mycaf$gene_name
+icaf_matrix <- vst[icaf_map$Geneid, ]
+rownames(icaf_matrix) <- icaf_map$gene_name
+
+all_matrix <- vst[all_map$Geneid, ]
+rownames(all_matrix) <- all_map$gene_name
+
+
+df <- as.data.frame(colData(dds))
+ann_df <- df[, c("cell_line", "treatment")]
+pheatmap(neural_matrix, scale = 'row', cluster_rows=FALSE, show_rownames=TRUE, show_colnames = TRUE,
+         cluster_cols=FALSE, trace = "none", annotation_col=ann_df, border_color = "black", cellwidth = 10, cellheight = 10, col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(15))
+
+
+tn_samples <- rownames(ann_df)[ann_df$treatment == "Treatment_Naive"]
+ann_df_tn <- ann_df[tn_samples, , drop = FALSE]
+pheatmap(neural_matrix[, tn_samples], scale = 'row', cluster_rows=TRUE, show_rownames=TRUE, show_colnames = TRUE,
+         cluster_cols=FALSE, trace = "none", annotation_col=ann_df, border_color = "black", cellwidth = 10, cellheight = 10, col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(15))
+pheatmap(neural_matrix, scale = 'row', cluster_rows=FALSE, show_rownames=TRUE, show_colnames = TRUE,
+         cluster_cols=FALSE, trace = "none", annotation_col=ann_df, border_color = "black", cellwidth = 10, cellheight = 10, col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(15))
+
+pheatmap(wnt_matrix[, tn_samples], scale = 'row', cluster_rows=TRUE
+        , show_rownames=TRUE, show_colnames = TRUE,
+         cluster_cols=FALSE, trace = "none", annotation_col=ann_df, border_color = "black", cellwidth = 10, cellheight = 10, col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(15))
+pheatmap(mycaf_matrix[, tn_samples], scale = 'row', cluster_rows=TRUE, show_rownames=TRUE, show_colnames = TRUE,
+         cluster_cols=FALSE, trace = "none", annotation_col=ann_df, border_color = "black", cellwidth = 10, cellheight = 10, col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(15))
+
+
+# Remove rows with zero or NA variance
+icaf_matrix_filtered <- icaf_matrix[, tn_samples]
+
+row_vars <- apply(icaf_matrix_filtered, 1, var)
+icaf_matrix_filtered <- icaf_matrix_filtered[!is.na(row_vars) & row_vars > 0, ]
+
+# Confirm no NAs remain after scaling
+scaled_check <- t(scale(t(icaf_matrix_filtered)))
+sum(is.na(scaled_check))  # Should be 0
+pheatmap(icaf_matrix_filtered[, tn_samples], scale = 'row', cluster_rows=TRUE
+         , show_rownames=TRUE, show_colnames = TRUE,
+         cluster_cols=FALSE, trace = "none", annotation_col=ann_df, border_color = "black", cellwidth = 10, cellheight = 10, col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(15))
+
+
+# Remove rows with zero or NA variance
+all_matrix <- all_matrix[, tn_samples]
+
+row_vars <- apply(all_matrix, 1, var)
+all_matrix <- all_matrix[!is.na(row_vars) & row_vars > 0, ]
+
+# Confirm no NAs remain after scaling
+scaled_check <- t(scale(t(all_matrix)))
+sum(is.na(scaled_check))  # Should be 0
+pheatmap(all_matrix[, tn_samples], scale = 'row', cluster_rows=TRUE
+         , show_rownames=TRUE, show_colnames = TRUE,
+         cluster_cols=TRUE, trace = "none", annotation_col=ann_df, border_color = "black", cellwidth = 10, cellheight = 10, col = colorRampPalette( rev(brewer.pal(9, "RdBu")) )(15))
+
+
+#Bar plot versions
+library(plyr)
+plot_gene_bar <- function(gene_symbol, vst_full, metadata_full) {
+  
+  # Get Ensembl ID for this gene
+  gene_id <- gene_info$Geneid[
+    which(!is.na(gene_info$gene_name) & gene_info$gene_name == gene_symbol)
+  ][1]
+  
+  if (is.na(gene_id)) {
+    message("Gene not found: ", gene_symbol)
+    return(NULL)
+  }
+  
+  if (!(gene_id %in% rownames(vst_full))) {
+    message("Gene ID found in gene_info but not in vst_full: ", gene_id)
+    return(NULL)
+  }
+  
+  # Build replicate-level data frame
+  df <- data.frame(
+    expression = as.numeric(vst_full[gene_id, ]),
+    sample     = colnames(vst_full)
+  ) %>%
+    left_join(metadata_full, by = "sample") %>%
+    mutate(expression_scaled = expression)
+  
+  # Make sure treatment order is correct
+  df$treatment <- factor(df$treatment,
+                         levels = c("Treatment_Naive", "Gemcitabine"))
+  
+  # Summarize mean and SEM
+  summary_df <- df %>%
+    dplyr::group_by(cell_line, treatment) %>%
+    dplyr::summarise(
+      mean_expression = mean(expression_scaled, na.rm = TRUE),
+      sd_expression   = sd(expression_scaled, na.rm = TRUE),
+      n               = dplyr::n(),
+      sem_expression  = sd_expression / sqrt(n),
+      .groups = "drop"
+    )
+  # Plot
+  ggplot(summary_df, aes(x = cell_line, y = mean_expression, fill = treatment)) +
+    geom_col(
+      position = position_dodge(width = 0.75),
+      width = 0.65,
+      color = "black",
+      linewidth = 0.3,
+      alpha = 0.9
+    ) +
+    geom_errorbar(
+      aes(ymin = mean_expression - sem_expression,
+          ymax = mean_expression + sem_expression),
+      position = position_dodge(width = 0.75),
+      width = 0.18,
+      linewidth = 0.4
+    ) +
+    geom_point(
+      data = df,
+      aes(x = cell_line, y = expression_scaled, fill = treatment),
+      position = position_jitterdodge(
+        jitter.width = 0.05,
+        dodge.width = 0.75
+      ),
+      size = 1.8,
+      alpha = 0.8,
+      color = "black",
+      shape = 21,
+      inherit.aes = FALSE
+    ) +
+    scale_fill_manual(
+      values = c("Treatment_Naive" = "#F4C0D1",
+                 "Gemcitabine"     = "#C2185B"),
+      labels = c("Treatment_Naive" = "TREATMENT NAIVE",
+                 "Gemcitabine"     = "POST CHEMOTHERAPY")
+    ) +
+    geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.3) +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.08))) +
+    labs(
+      title = bquote(italic(.(gene_symbol))),
+      y     = "Expression Level (z-score)",
+      x     = NULL,
+      fill  = NULL
+    ) +
+    theme_bw(base_size = 12) +
+    theme(
+      plot.title         = element_text(face = "bold.italic",
+                                        hjust = 0.5,
+                                        size = 13),
+      axis.text.x        = element_text(size = 11),
+      axis.text.y        = element_text(size = 10),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      legend.position    = "bottom",
+      legend.text        = element_text(size = 9),
+      panel.border       = element_rect(color = "black", linewidth = 0.5)
+    )
+}
+
+
+#Log normalize data 
+# Make numeric count matrix
+counts_mat <- as.matrix(round(count_matrix))
+storage.mode(counts_mat) <- "numeric"
+
+# Library size per sample
+lib_size <- colSums(counts_mat)
+
+# Seurat-like LogNormalize: log1p(counts per 10,000)
+lognorm_10k <- log1p(t(t(counts_mat) / lib_size * 10000))
+
+# Check dimensions and values
+dim(lognorm_10k)
+range(lognorm_10k, na.rm = TRUE)
+colnames(lognorm_10k)
+
+
+#now make a new function to add stats to the bar 
+plot_gene_bar_lognorm_stats <- function(gene_symbol, expr_mat, metadata_full,
+                                        test = "t.test") {
+  
+  # Get Ensembl ID for this gene
+  gene_id <- gene_info$Geneid[
+    which(!is.na(gene_info$gene_name) & gene_info$gene_name == gene_symbol)
+  ][1]
+  
+  if (is.na(gene_id)) {
+    message("Gene not found: ", gene_symbol)
+    return(NULL)
+  }
+  
+  if (!(gene_id %in% rownames(expr_mat))) {
+    message("Gene ID found in gene_info but not in expression matrix: ", gene_id)
+    return(NULL)
+  }
+  
+  # Build replicate-level data frame
+  df <- data.frame(
+    expression = as.numeric(expr_mat[gene_id, ]),
+    sample     = colnames(expr_mat)
+  ) %>%
+    dplyr::left_join(metadata_full, by = "sample")
+  
+  df$treatment <- factor(df$treatment,
+                         levels = c("Treatment_Naive", "Gemcitabine"))
+  
+  df$cell_line <- factor(df$cell_line,
+                         levels = c("2562", "2586", "1478"))
+  
+  # Summarize mean and SEM for bars
+  summary_df <- df %>%
+    dplyr::group_by(cell_line, treatment) %>%
+    dplyr::summarise(
+      mean_expression = mean(expression, na.rm = TRUE),
+      sd_expression   = sd(expression, na.rm = TRUE),
+      n               = dplyr::n(),
+      sem_expression  = sd_expression / sqrt(n),
+      .groups = "drop"
+    )
+  
+  # Statistical test within each cell line
+  if (test == "t.test") {
+    stat_df <- df %>%
+      dplyr::group_by(cell_line) %>%
+      rstatix::t_test(expression ~ treatment) %>%
+      dplyr::ungroup()
+  } else if (test == "wilcox.test") {
+    stat_df <- df %>%
+      dplyr::group_by(cell_line) %>%
+      rstatix::wilcox_test(expression ~ treatment) %>%
+      dplyr::ungroup()
+  } else {
+    stop("test must be either 't.test' or 'wilcox.test'")
+  }
+  
+  # Add bracket positions
+  max_df <- df %>%
+    dplyr::group_by(cell_line) %>%
+    dplyr::summarise(
+      ymax = max(expression, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  stat_df <- stat_df %>%
+    dplyr::left_join(max_df, by = "cell_line") %>%
+    dplyr::mutate(
+      cell_line_num = as.numeric(factor(cell_line, levels = c("2562", "2586", "1478"))),
+      xmin = cell_line_num - 0.2,
+      xmax = cell_line_num + 0.2,
+      y.position = ymax + 0.25,
+      p_label = dplyr::case_when(
+        p <= 0.0001 ~ "****",
+        p <= 0.001  ~ "***",
+        p <= 0.01   ~ "**",
+        p <= 0.05   ~ "*",
+        TRUE        ~ "ns"
+      )
+    )
+  
+  # Plot
+  ggplot(summary_df, aes(x = cell_line, y = mean_expression, fill = treatment)) +
+    geom_col(
+      position = position_dodge(width = 0.75),
+      width = 0.65,
+      color = "black",
+      linewidth = 0.3,
+      alpha = 0.9
+    ) +
+    geom_errorbar(
+      aes(ymin = mean_expression - sem_expression,
+          ymax = mean_expression + sem_expression),
+      position = position_dodge(width = 0.75),
+      width = 0.18,
+      linewidth = 0.4
+    ) +
+    geom_point(
+      data = df,
+      aes(x = cell_line, y = expression, fill = treatment),
+      position = position_jitterdodge(
+        jitter.width = 0.05,
+        dodge.width = 0.75
+      ),
+      size = 1.8,
+      alpha = 0.85,
+      color = "black",
+      shape = 21,
+      inherit.aes = FALSE
+    ) +
+    ggpubr::stat_pvalue_manual(
+      stat_df,
+      label = "p_label",
+      xmin = "xmin",
+      xmax = "xmax",
+      y.position = "y.position",
+      tip.length = 0.01,
+      bracket.size = 0.35,
+      size = 4,
+      inherit.aes = FALSE
+    ) +
+    scale_fill_manual(
+      values = c("Treatment_Naive" = "#F4C0D1",
+                 "Gemcitabine"     = "#C2185B"),
+      labels = c("Treatment_Naive" = "TREATMENT NAIVE",
+                 "Gemcitabine"     = "POST CHEMOTHERAPY")
+    ) +
+    scale_y_continuous(
+      limits = c(0, NA),
+      expand = expansion(mult = c(0, 0.18))
+    ) +
+    labs(
+      title = bquote(italic(.(gene_symbol))),
+      y     = "Log-normalized expression",
+      x     = NULL,
+      fill  = NULL
+    ) +
+    theme_bw(base_size = 12) +
+    theme(
+      plot.title         = element_text(face = "bold.italic",
+                                        hjust = 0.5,
+                                        size = 13),
+      axis.text.x        = element_text(size = 11),
+      axis.text.y        = element_text(size = 10),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      legend.position    = "bottom",
+      legend.text        = element_text(size = 9),
+      panel.border       = element_rect(color = "black", linewidth = 0.5)
+    )
+}
+
+plot_gene_bar("SEMA3A", lognorm_10k, metadata) 
+plot_gene_bar_lognorm_stats("SEMA3A", lognorm_10k, metadata)
+
+plot_gene_bar("NRP1", lognorm_10k, metadata)
+plot_gene_bar_lognorm_stats("NRP1", lognorm_10k, metadata)
+
+plot_gene_bar("SLIT2", lognorm_10k, metadata)
+plot_gene_bar_lognorm_stats("SLIT2", lognorm_10k, metadata)
+
+plot_gene_bar("ROBO1", lognorm_10k, metadata)
+plot_gene_bar("NEGR1", lognorm_10k, metadata)
+plot_gene_bar("EPHA3", lognorm_10k, metadata)
+plot_gene_bar("NFIA", lognorm_10k, metadata)
+
+```

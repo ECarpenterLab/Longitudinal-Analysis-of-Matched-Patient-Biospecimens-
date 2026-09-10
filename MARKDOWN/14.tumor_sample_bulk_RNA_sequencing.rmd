@@ -1,0 +1,220 @@
+---
+title: "14_tumor_sample_bulkRNA_Sequencing"
+author: "Aylin Henstridge (Aylinhen@umich.edu)"
+date: "2026-06-24"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    warnings: FALSE
+    number_sections: true
+    toc_float: true
+    code_download: true
+    fig_caption: true
+    fig_width: 10
+    fig_height: 6
+    highlight: 'tango'
+    theme: united
+knit: (function(input, ...){rmarkdown::render(input, output_dir = "../DOCUMENTS")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(toc = TRUE)
+```
+
+```{css, echo = FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class]{
+  max-height: 500px;
+}
+
+.scroll-100{
+  max-height: 500px;
+  overflow-y: auto;
+  background-color: inherit;
+}
+```
+
+# Load in libraries and data
+```{r, message=FALSE, warning=FALSE}
+suppressPackageStartupMessages({
+library(base)
+library(readxl)
+library(DESeq2)
+library(pheatmap)
+library(RColorBrewer)
+library(ggplot2)
+library(magrittr)
+library(GSVA)
+library(msigdbr)
+library(dplyr)
+library(tibble)
+library(Glimma)
+library(PCAtools)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+})
+
+#Read in bulk RNA sequencign counts and metadata files
+#organoid counts is the combined filtered_count_matrix_organoid_samples.txt
+organoids_counts <- read.table("geo_upload_files/filtered_count_matrix_organoid_samples.txt", header = T, quote = "", sep = "\t")
+metadata <- read.csv("metadata_coculture_organoids.csv") 
+
+
+```
+
+# DESeq2 Analyss
+```{r, message=FALSE, warning=FALSE}
+#create our deseq2 dataset combining metadata that shows tissue type and patient ID with the sample ID from sequencing information
+#corrected for batch and including all of the metadata we read in. 
+dds <- DESeqDataSetFromMatrix(countData = organoids_counts,
+                              colData = metadata,
+                              design = ~ batch)
+
+#differntial expression analysis
+dds <- DESeq(dds)
+resultsNames(dds)
+res <- results(dds)
+res
+
+#DESeq(): Normalizes counts, estimates fold changes, runs main DESeq2 pipeline.
+#resultsNames(): Shows available coefficients from the model (e.g., batch vs batch2, condition vs control, etc.).
+#results(dds): Extracts results table (DE genes: logFC, p-values, etc.).
+vst <- assay(vst(dds))
+#vst(dds): Applies DESeq2’s variance stabilizing transformation to your counts. 
+#This makes the data more homoscedastic (variance less dependent on mean)—crucial for PCA 
+#and plotting.
+#assay(...): Extracts just the transformed count matrix.
+
+rv <- rowVars(vst)
+select <- order(rv, decreasing=TRUE)[seq_len(min(500, length(dds)))]
+
+#rowVars(vst): For each gene, compute variance across all samples. 
+#Genes with higher variance are more informative for PCA (they drive sample differences).
+#order(rv, decreasing=TRUE): Ranks genes from most to least variable.
+#select ...: Picks the top 500 variable genes—or, if you have fewer than 500 genes, 
+#just all of them. This is a classic way to focus PCA on the key “drivers” of sample separation.
+pca <- pca(vst[select,], metadata = colData(dds))
+biplot(pca,
+       showLoadings = F,
+       boxedLoadingsNames = T,
+       colby = 'patient_id',
+       shape = 'tissue',
+       labSize = 0, pointSize = 5,
+       legendPosition = 'right',
+       legendLabSize = 7, legendIconSize = 4, legendTitleSize = 10)
+
+#Differentially expressed genes
+# ── Differential Expression: Cell Line 1594 vs 1253 ──────────────────────────
+
+# 1. Set cell line as a factor with 1253 as reference, directly on existing dds
+dds$patient_id <- factor(dds$patient_id, levels = c("1253", "1594"))
+
+# 2. Update the design to control for batch and test cell line effect
+design(dds) <- ~ patient_id
+
+# 3. Run DESeq2
+dds <- DESeq(dds)
+resultsNames(dds)  # Should show "patient_id_1594_vs_1253"
+
+# 4. Extract results
+res_cl <- results(dds,
+                  name  = "patient_id_1594_vs_1253",
+                  alpha = 0.05)
+summary(res_cl)
+
+# 5. Shrink LFC estimates
+res_cl_shrunk <- lfcShrink(dds,
+                           coef = "patient_id_1594_vs_1253",
+                           type = "ashr")
+
+# 6. Export to data frame
+res_df <- as.data.frame(res_cl_shrunk) %>%
+  rownames_to_column("ensembl_id") %>%
+  arrange(padj)
+
+gene_symbols <- AnnotationDbi::select(org.Hs.eg.db,
+                                      keys    = rownames(dds),
+                                      columns = c("ENSEMBL", "SYMBOL"),
+                                      keytype = "ENSEMBL") %>%
+  distinct(ENSEMBL, .keep_all = TRUE) %>%
+  column_to_rownames("ENSEMBL")
+
+rownames(res_df) <- res_df[,1]
+
+head(rownames(res_df))
+head(rownames(gene_symbols))
+
+
+res_df <- res_df %>%
+  data.frame() %>%
+  merge(gene_symbols, by = 0) %>%
+  filter(!is.na(padj)) %>%
+  rename(gene_id = Row.names) %>%
+  mutate(status = ifelse(log2FoldChange > 0.5 & padj < 0.05, 1,
+                         ifelse(log2FoldChange < -0.5 & padj < 0.05, -1, 0))) %>%
+  arrange(padj)
+
+
+head(res_df, 20)
+
+write.csv(res_df, "DE_1594_vs_1253.csv", row.names = FALSE)
+
+
+#you will collapse the technical replicates to make sure the analysis is being performed on
+#biologically active samples; it is also critical that you sum them and not average as that is standard in the field
+#DDS is the raw master data used for differential gene expression
+#VST is variance stabilized and is used for PCA, clustering, heatmaps etc.
+#VST controls for how skewed this data is. 
+dds <- collapseReplicates(dds, dds$patient_id)
+vst <- assay(vst(dds))
+rv <- rowVars(vst)
+select <- order(rv, decreasing=TRUE)[seq_len(min(500, length(dds)))]
+pca <- pca(vst[select,], metadata = colData(dds))
+biplot(pca,
+       showLoadings = F,
+       boxedLoadingsNames = T,
+       colby = 'patient_id',
+       shape = 'tissue',
+       labSize = 0, pointSize = 5, 
+       legendPosition = 'right',
+       legendLabSize = 7, legendIconSize = 4, legendTitleSize = 10)
+
+
+#Heat map
+# Combine all your genes of interest
+
+library(RColorBrewer)
+genes_of_interest <- c("ADAM10", "FGFR2", "GAS5",
+                       "FZD5", "RYK", "SEMA3A",
+                       "VEGFA", "SEMA3B", "NRP1",
+                       "ROR1", "SEMA3C", "VEGFB",
+                       "RERG", "IL32", "IFITM2", "ROR2",
+                       "NRG4", "MMP3", "TGFB2", "IL7",
+                       "NRG1", "MMP12")
+
+
+gene_map <- gene_symbols[gene_symbols$SYMBOL %in% genes_of_interest, , drop = FALSE]
+selected_genes <- vst[rownames(gene_map), , drop = FALSE]
+head(rownames(gene_map))
+head(rownames(vst))
+sum(rownames(gene_map) %in% rownames(vst))
+
+df <- as.data.frame(colData(dds))
+
+pheatmap(selected_genes, scale = 'none', cluster_rows = TRUE, show_rownames = TRUE, show_colnames = TRUE,
+         cluster_cols = FALSE, border_color = "black", cellwidth = 10, cellheight = 10,
+         labels_row = gene_map$SYMBOL[match(rownames(selected_genes), rownames(gene_map))],
+         col = colorRampPalette(rev(brewer.pal(9, "RdBu")))(15))
+
+
+
+
+```
+
+
+

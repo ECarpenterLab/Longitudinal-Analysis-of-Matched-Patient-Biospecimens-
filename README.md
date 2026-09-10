@@ -141,7 +141,10 @@ This repository contains code used for bulk RNA sequencing analysis performed in
 Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
 
 - **`DOCUMENTS/`**  
-Contains the rendered markdown files as .html files. 
+Contains the rendered markdown files as .html files.
+
+-**`UTILS/`**
+Contains the gene_info.csv file needed for the CAF bulk_RNA_Seq analysis pipeline. 
 
 ---
 

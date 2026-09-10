@@ -143,9 +143,6 @@ Contains raw markdown script files corresponding to each section of the analysis
 - **`DOCUMENTS/`**  
 Contains the rendered markdown files as .html files.
 
--**`UTILS/`**
-Contains the gene_info.csv file needed for the CAF bulk_RNA_Seq analysis pipeline. 
-
 ---
 
 # Execution Order (Recommended)

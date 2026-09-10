@@ -138,10 +138,10 @@ This repository contains code used for bulk RNA sequencing analysis performed in
 ---
 
 - **`MARKDOWN/`**  
-  Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
+Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
 
-  - **`DOCUMENTS/`**  
-  Contains the rendered markdown files as .html files. 
+- **`DOCUMENTS/`**  
+Contains the rendered markdown files as .html files. 
 
 ---
 

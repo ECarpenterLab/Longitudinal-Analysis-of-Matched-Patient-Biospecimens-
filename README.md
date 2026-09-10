@@ -1,4 +1,4 @@
-# Repository Overview
+# Single Cell RNA Sequencing Repository Overview
 
 This repository contains code used for single-cell RNA sequencing analysis performed in the paper:
 
@@ -16,9 +16,10 @@ This repository contains code used for single-cell RNA sequencing analysis perfo
   Update the file path in the samples_info sheet to match the path from your working directory.
 
 - **`MARKDOWN/`**  
-  Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory. 
+  Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
+  
 - **`OBJECTS/`**  
-  The seurat object and filtered matrices to be downloaded into this can be found at the NIH Gene   Expression Omnibus database GSE345774.
+  The seurat object and filtered matrices to be downloaded into this can be found at the NIH Gene Expression Omnibus database GSE345774.
 
 The processed and annotated Seurat objects generated from the below scripts should be saved into this folder:
   - [`/MARKDOWN/00_ambient_RNA_correction.rmd`](/MARKDOWN/00_ambient_RNA_correction.rmd)
@@ -130,7 +131,21 @@ Epithelial cell characterization for Patient 1475:
 
 ---
 
-## Execution Order (Recommended)
+# Bulk Cell RNA Sequencing Repository Overview
+
+This repository contains code used for bulk RNA sequencing analysis performed in the paper. The processed expected gene counts and featureCounts output files required for this analysis can be found on Gene Expression Omnibus... and the raw unprocessed files will be at dbgap accession number...
+
+---
+
+- **`MARKDOWN/`**  
+  Contains raw markdown script files corresponding to each section of the analysis. This folder serves as the primary working directory.
+
+  - **`DOCUMENTS/`**  
+  Contains the rendered markdown files as .html files. 
+
+---
+
+# Execution Order (Recommended)
 
 For full reproducibility, scripts should be run in the following general order:
 
@@ -143,5 +158,7 @@ For full reproducibility, scripts should be run in the following general order:
 7. Cell–cell communication analysis
 8. Trajectory analysis
 9. Spatial Transcriptomics analysis
+10. bulk RNA sequencing analysis
 
 ---
+

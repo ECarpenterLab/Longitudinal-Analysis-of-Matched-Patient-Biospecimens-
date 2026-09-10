@@ -66,10 +66,10 @@ colnames(count_matrix)
 
 # DESeq2 Analyss
 ```{r, message=FALSE, warning=FALSE}
-# ── Build sample metadata ──────────────────────────────────
+#Build Sample Metadata 
 metadata <- data.frame(
   sample    = paste0("Sample_", sprintf("%02d", 1:18)),
-  cell_line = factor(c(rep("2562", 6),
+  cell_line = factor(c(rep("1868", 6),
                        rep("2586", 6),
                        rep("1478", 6))),
   treatment = factor(c("Treatment_Naive", "Treatment_Naive", "Treatment_Naive",
@@ -82,8 +82,8 @@ metadata <- data.frame(
   replicate = factor(c(1,2,3, 1,2,3,
                        1,2,3, 1,2,3,
                        1,2,3, 1,2,3)),
-  replicate_id = factor(c(rep("2562_TN", 3),
-                          rep("2562_Gem", 3),
+  replicate_id = factor(c(rep("1868", 3),
+                          rep("1868_Gem", 3),
                           rep("2586_TN", 3),
                           rep("2586_Gem", 3),
                           rep("1478_TN", 3),
@@ -403,7 +403,7 @@ plot_gene_bar_lognorm_stats <- function(gene_symbol, expr_mat, metadata_full,
                          levels = c("Treatment_Naive", "Gemcitabine"))
   
   df$cell_line <- factor(df$cell_line,
-                         levels = c("2562", "2586", "1478"))
+                         levels = c("1868", "2586", "1478"))
   
   # Summarize mean and SEM for bars
   summary_df <- df %>%
@@ -442,7 +442,7 @@ plot_gene_bar_lognorm_stats <- function(gene_symbol, expr_mat, metadata_full,
   stat_df <- stat_df %>%
     dplyr::left_join(max_df, by = "cell_line") %>%
     dplyr::mutate(
-      cell_line_num = as.numeric(factor(cell_line, levels = c("2562", "2586", "1478"))),
+      cell_line_num = as.numeric(factor(cell_line, levels = c("1868", "2586", "1478"))),
       xmin = cell_line_num - 0.2,
       xmax = cell_line_num + 0.2,
       y.position = ymax + 0.25,
